@@ -19,6 +19,7 @@
         }
       ]
     },
-    "dialog:default"
+    "dialog:default",
+    "core:window:allow-show"
   ]
 }

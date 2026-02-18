@@ -12,9 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "Dragonfly Terminal",
+        "title": "Dragonfly",
         "width": 1280,
-        "height": 800
+        "height": 800,
+        "visible": false
       }
     ],
     "security": {

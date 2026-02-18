@@ -36,6 +36,12 @@ function App() {
   const { t, i18n } = useTranslation();
 
   useEffect(() => {
+    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+      getCurrentWindow().show();
+    });
+  }, []);
+
+  useEffect(() => {
     if (uiConfig.language && uiConfig.language !== i18n.language) {
       i18n.changeLanguage(uiConfig.language);
     }
