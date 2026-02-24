@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { type IMarker, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useApp } from "../../context/AppContext";
 import { useTheme } from "../../context/ThemeContext";
 import type { FuzzyResult } from "../../types";
 import CommandSuggestions from "./CommandSuggestions";
@@ -39,8 +42,10 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const { theme } = useTheme();
   const { t } = useTranslation();
+  const { showContextMenu, appSettings } = useApp();
 
   // Fuzzy search: refs for the onData callback, state for rendering
   const currentLineRef = useRef("");
@@ -58,6 +63,17 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
     fallbackPromptEndX: 0,
     fallbackNeedsDetection: true,
   });
+
+  // Search bar state
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  // Track last selected text for "Paste Selected Text" action
+  const lastSelectionRef = useRef("");
+  const appSettingsRef = useRef(appSettings);
+
+  useEffect(() => {
+    appSettingsRef.current = appSettings;
+  }, [appSettings]);
 
   const [suggestions, setSuggestions] = useState<FuzzyResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -139,8 +155,8 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
       invoke("write_to_session", {
         sessionId,
         data: `${eraseChars + command}\r`,
-      }).catch(() => {});
-      invoke("add_command_history", { sessionId, command }).catch(() => {});
+      }).catch(() => { });
+      invoke("add_command_history", { sessionId, command }).catch(() => { });
       currentLineRef.current = "";
       shellIntegrationRef.current.fallbackNeedsDetection = true;
 
@@ -174,20 +190,26 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
     if (!containerRef.current) return;
 
     const terminal = new Terminal({
-      cursorBlink: true,
-      cursorStyle: "block",
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', monospace",
+      scrollback: appSettings.terminal.scrollback_lines,
+      cursorBlink: appSettings.appearance.cursor_blink,
+      cursorStyle: appSettings.appearance.cursor_style as "block" | "underline" | "bar",
+      fontSize: appSettings.appearance.font_size,
+      fontFamily: appSettings.appearance.font_family,
+      wordSeparator: appSettings.interaction.word_separators,
       theme: { ...theme.colors.terminal },
       allowProposedApi: true,
     });
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
+    const searchAddon = new SearchAddon();
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
+    terminal.loadAddon(searchAddon);
     terminal.open(containerRef.current);
+
+    searchAddonRef.current = searchAddon;
 
     // Initial fit
     requestAnimationFrame(() => {
@@ -332,7 +354,7 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
             si.commandStartX,
           ).trim();
           if (command) {
-            invoke("add_command_history", { sessionId, command }).catch(() => {});
+            invoke("add_command_history", { sessionId, command }).catch(() => { });
           }
         }
         currentLineRef.current = "";
@@ -377,6 +399,7 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
 
     let outputUnlisten: UnlistenFn | null = null;
     let closedUnlisten: UnlistenFn | null = null;
+    let focusUnlisten: UnlistenFn | null = null;
 
     const setupListeners = async () => {
       outputUnlisten = await listen<string>(`terminal-output-${sessionId}`, (event) => {
@@ -400,6 +423,10 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
         terminal.write(`\r\n\x1b[31m[${t("terminal.sessionDisconnected")}]\x1b[0m\r\n`);
       });
 
+      focusUnlisten = await listen<void>(`focus-terminal-${sessionId}`, () => {
+        terminal.focus();
+      });
+
       // Listener is ready — tell the backend to flush buffered output
       await invoke("attach_session", { sessionId });
     };
@@ -420,7 +447,7 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
             invoke("write_to_session", {
               sessionId,
               data: eraseChars + selected.command,
-            }).catch(() => {});
+            }).catch(() => { });
             currentLineRef.current = selected.command;
             dismissSuggestions();
           }
@@ -460,14 +487,14 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
             invoke("write_to_session", {
               sessionId,
               data: `${eraseChars + selected.command}\r`,
-            }).catch(() => {});
+            }).catch(() => { });
             // When shell integration is active, OSC 133;C will capture
             // the command for history. In fallback mode, record it here.
             if (!shellIntegrationRef.current.enabled) {
               invoke("add_command_history", {
                 sessionId,
                 command: selected.command,
-              }).catch(() => {});
+              }).catch(() => { });
             }
             currentLineRef.current = "";
             shellIntegrationRef.current.fallbackNeedsDetection = true;
@@ -544,6 +571,140 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
     });
     observer.observe(containerRef.current);
 
+    // Auto-copy on select
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      if (appSettingsRef.current?.interaction?.copy_on_select) {
+        const text = terminal.getSelection();
+        if (text) {
+          navigator.clipboard.writeText(text).catch(() => { });
+        }
+      }
+    });
+
+    // ── Right-click context menu ──────────────────────────────────────────
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const selection = terminal.getSelection();
+      const hasSelection = selection.length > 0;
+
+      if (hasSelection) {
+        lastSelectionRef.current = selection;
+      }
+
+      // --- Action handlers ---
+      const doPaste = async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            invoke("write_to_session", { sessionId, data: text }).catch(() => { });
+          }
+        } catch { /* clipboard access denied */ }
+        terminal.focus();
+      };
+
+      const doFind = () => {
+        if (hasSelection) {
+          setSearchQuery(selection);
+          // perform initial search with the selection
+          setTimeout(() => searchAddon.findNext(selection), 50);
+        }
+        setShowSearchBar(true);
+        terminal.focus();
+      };
+
+      if (appSettingsRef.current?.interaction?.right_click_paste && !hasSelection) {
+        doPaste();
+        return;
+      }
+
+      const doClearScreen = () => {
+        terminal.clear();
+        terminal.focus();
+      };
+
+      const doClearAll = () => {
+        terminal.reset();
+        terminal.focus();
+      };
+
+      const doSelectAll = () => {
+        terminal.selectAll();
+        terminal.focus();
+      };
+
+      // --- Build menu items ---
+      const items: Array<{ icon?: string; label: string; color?: string; onClick: () => void; divider?: boolean }> = [];
+
+      if (hasSelection) {
+        items.push(
+          {
+            icon: "content_copy", label: t("terminalCtx.copy"), onClick: () => {
+              navigator.clipboard.writeText(selection);
+              terminal.focus();
+            }
+          },
+          {
+            icon: "copy_all", label: t("terminalCtx.copyCommand"), onClick: () => {
+              const cmd = readBetweenMarkerAndCursor(
+                terminal,
+                shellIntegrationRef.current.commandStartMarker!,
+                shellIntegrationRef.current.commandStartX,
+              ).trim();
+              navigator.clipboard.writeText(cmd || selection);
+              terminal.focus();
+            }
+          },
+          { icon: "search", label: t("terminalCtx.find"), onClick: doFind },
+          {
+            icon: "travel_explore", label: t("terminalCtx.searchOnline"), onClick: () => {
+              const searchSettings = appSettingsRef.current?.search;
+              let url = `https://www.google.com/search?q=${encodeURIComponent(selection)}`;
+
+              if (searchSettings) {
+                const engine = searchSettings.custom_engines.find(e => e.name === searchSettings.default_engine)
+                  || searchSettings.custom_engines[0];
+                if (engine && engine.url_template) {
+                  url = engine.url_template.replace("%s", encodeURIComponent(selection));
+                }
+              }
+
+              openUrl(url);
+              terminal.focus();
+            }
+          },
+          { label: "", onClick: () => { }, divider: true },
+          { icon: "content_paste", label: t("terminalCtx.paste"), onClick: doPaste },
+          {
+            icon: "content_paste_go", label: t("terminalCtx.pasteSelectedText"), onClick: () => {
+              if (lastSelectionRef.current) {
+                invoke("write_to_session", { sessionId, data: lastSelectionRef.current }).catch(() => { });
+              }
+              terminal.focus();
+            }
+          },
+        );
+      } else {
+        items.push(
+          { icon: "content_paste", label: t("terminalCtx.paste"), onClick: doPaste },
+          { icon: "search", label: t("terminalCtx.find"), onClick: doFind },
+        );
+      }
+
+      items.push(
+        { label: "", onClick: () => { }, divider: true },
+        { icon: "clear_all", label: t("terminalCtx.clearScreen"), onClick: doClearScreen },
+        { icon: "delete_sweep", label: t("terminalCtx.clearAll"), onClick: doClearAll },
+        { label: "", onClick: () => { }, divider: true },
+        { icon: "select_all", label: t("terminalCtx.selectAll"), onClick: doSelectAll },
+      );
+
+      showContextMenu({ x: e.clientX, y: e.clientY, items });
+    };
+
+    containerRef.current.addEventListener("contextmenu", handleContextMenu);
+
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
 
@@ -559,13 +720,17 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
       writeParsedDisposable.dispose();
       dataDisposable.dispose();
       resizeDisposable.dispose();
+      selectionDisposable.dispose();
 
+      containerRef.current?.removeEventListener("contextmenu", handleContextMenu);
       observer.disconnect();
       if (outputUnlisten) outputUnlisten();
       if (closedUnlisten) closedUnlisten();
+      if (focusUnlisten) focusUnlisten();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
+      searchAddonRef.current = null;
     };
   }, [sessionId]);
 
@@ -586,9 +751,124 @@ export default function XTerminal({ sessionId, active }: XTerminalProps) {
     }
   }, [theme]);
 
+  // React to appearance settings changes: font family, size, cursor etc
+  useEffect(() => {
+    if (terminalRef.current) {
+      const options = terminalRef.current.options;
+      const appearance = appSettings.appearance;
+      options.fontFamily = appearance.font_family;
+      options.fontSize = appearance.font_size;
+      options.cursorBlink = appearance.cursor_blink;
+      options.cursorStyle = appearance.cursor_style as "block" | "underline" | "bar";
+
+      // Setting ligatures via xterm-addon-webgl or xterm-addon-canvas involves addon management,
+      // but standard xterm handles some basic font features. We might need addon-ligatures later.
+
+      // Auto-fit on font size change
+      if (fitAddonRef.current) {
+        requestAnimationFrame(() => fitAddonRef.current?.fit());
+      }
+    }
+  }, [appSettings.appearance]);
+
+  // React to terminal core settings changes: scrollback
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.scrollback = appSettings.terminal.scrollback_lines;
+    }
+  }, [appSettings.terminal]);
+
+  // React to interaction settings changes
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.wordSeparator = appSettings.interaction.word_separators;
+    }
+  }, [appSettings.interaction]);
+
+  // Search bar handlers
+  const handleSearchNext = () => {
+    if (searchAddonRef.current && searchQuery) {
+      searchAddonRef.current.findNext(searchQuery);
+    }
+  };
+
+  const handleSearchPrev = () => {
+    if (searchAddonRef.current && searchQuery) {
+      searchAddonRef.current.findPrevious(searchQuery);
+    }
+  };
+
+  const handleCloseSearch = () => {
+    setShowSearchBar(false);
+    setSearchQuery("");
+    searchAddonRef.current?.clearDecorations();
+    terminalRef.current?.focus();
+  };
+
   return (
     <div className="h-full w-full relative" style={{ display: active ? "block" : "none" }}>
       <div ref={containerRef} className="h-full w-full" />
+
+      {/* Floating search bar */}
+      {showSearchBar && (
+        <div
+          className="absolute top-1 right-1 flex items-center gap-1 px-2 py-1 rounded shadow-lg border z-50"
+          style={{
+            backgroundColor: "var(--df-bg-panel)",
+            borderColor: "var(--df-border)",
+            color: "var(--df-text)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            autoFocus
+            type="text"
+            className="bg-transparent outline-none text-xs px-1 py-0.5"
+            style={{ color: "var(--df-text)", width: "180px" }}
+            placeholder={t("terminalCtx.find")}
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              if (e.target.value && searchAddonRef.current) {
+                searchAddonRef.current.findNext(e.target.value);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.shiftKey) handleSearchPrev();
+                else handleSearchNext();
+              } else if (e.key === "Escape") {
+                handleCloseSearch();
+              }
+            }}
+          />
+          <span
+            className="material-icons text-sm cursor-pointer hover:opacity-80"
+            style={{ color: "var(--df-text-muted)" }}
+            onClick={handleSearchPrev}
+            title="Previous"
+          >
+            keyboard_arrow_up
+          </span>
+          <span
+            className="material-icons text-sm cursor-pointer hover:opacity-80"
+            style={{ color: "var(--df-text-muted)" }}
+            onClick={handleSearchNext}
+            title="Next"
+          >
+            keyboard_arrow_down
+          </span>
+          <span
+            className="material-icons text-sm cursor-pointer hover:opacity-80"
+            style={{ color: "var(--df-text-muted)" }}
+            onClick={handleCloseSearch}
+            title="Close"
+          >
+            close
+          </span>
+        </div>
+      )}
+
       <CommandSuggestions
         suggestions={suggestions}
         visible={showSuggestions}
