@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { MdChevronRight, MdHistory } from "react-icons/md";
 import type { FuzzyResult } from "../../types";
 
 interface CommandSuggestionsProps {
@@ -94,10 +95,11 @@ function CommandSuggestions({
         className="px-2 py-1.5 text-[10px] uppercase tracking-wider border-b flex items-center gap-1.5"
         style={{ color: "var(--df-text-dimmed)", borderColor: "var(--df-border)" }}
       >
-        <span className="material-icons text-[12px]">history</span>
+        <MdHistory className="text-[12px]" />
         <span>{t("suggestions.history")}</span>
         <span className="ml-auto" style={{ color: "var(--df-text-dimmed)" }}>
-          {suggestions.length} {suggestions.length !== 1 ? t("suggestions.matches") : t("suggestions.match")}
+          {suggestions.length}{" "}
+          {suggestions.length !== 1 ? t("suggestions.matches") : t("suggestions.match")}
         </span>
       </div>
 
@@ -117,14 +119,12 @@ function CommandSuggestions({
           }}
           onClick={() => onSelect(result.command)}
         >
-          <span
-            className="material-icons text-[12px] shrink-0"
+          <MdChevronRight
+            className="text-[12px] shrink-0"
             style={{
               color: index === selectedIndex ? "var(--df-accent)" : "var(--df-text-dimmed)",
             }}
-          >
-            chevron_right
-          </span>
+          />
           <HighlightedCommand command={result.command} indices={result.indices} />
         </div>
       ))}

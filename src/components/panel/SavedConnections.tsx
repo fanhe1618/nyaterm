@@ -1,14 +1,28 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  MdDelete,
+  MdEdit,
+  MdExpandMore,
+  MdFolder,
+  MdFolderOpen,
+  MdLan,
+  MdRefresh,
+} from "react-icons/md";
+import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import { invoke } from "../../lib/invoke";
 import { logger } from "../../lib/logger";
 import type { Group, SavedConnection, SessionType } from "../../types";
-import { toast } from "sonner";
 
 interface SavedConnectionsProps {
   onEditConnection: (connection: SavedConnection) => void;
-  onSessionCreated: (sessionId: string, name: string, type: SessionType, connectionId?: string) => void;
+  onSessionCreated: (
+    sessionId: string,
+    name: string,
+    type: SessionType,
+    connectionId?: string,
+  ) => void;
 }
 
 interface HoverInfo {
@@ -27,7 +41,6 @@ export default function SavedConnections({
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
-
 
   // Build grouped view: use savedGroups order, include empty groups
   const { groups, ungrouped } = useMemo(() => {
@@ -115,7 +128,7 @@ export default function SavedConnections({
       onMouseEnter={(e) => handleMouseEnter(e, conn)}
       onMouseLeave={handleMouseLeave}
     >
-      <span className="material-icons text-emerald-500/70 text-sm shrink-0">lan</span>
+      <MdLan className="text-emerald-500/70 text-sm shrink-0" />
       <span
         className="flex-1 min-w-0 truncate text-[11px] font-medium pr-16"
         style={{ color: "var(--df-text)" }}
@@ -123,12 +136,10 @@ export default function SavedConnections({
         {conn.name}
       </span>
       {connectingId === conn.id && (
-        <span
-          className="animate-spin material-icons text-xs shrink-0"
+        <MdRefresh
+          className="animate-spin text-xs shrink-0"
           style={{ color: "var(--df-primary)" }}
-        >
-          refresh
-        </span>
+        />
       )}
       <div
         className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/item:flex items-center gap-0.5 shrink-0 backdrop-blur-sm rounded px-1"
@@ -140,7 +151,7 @@ export default function SavedConnections({
           title={t("savedConnections.edit")}
           onClick={(e) => handleEdit(e, conn)}
         >
-          <span className="material-icons text-sm">edit</span>
+          <MdEdit className="text-sm" />
         </button>
         <button
           className="p-0.5 hover:text-red-400 transition-colors"
@@ -148,7 +159,7 @@ export default function SavedConnections({
           title={t("savedConnections.delete")}
           onClick={(e) => handleDelete(e, conn.id)}
         >
-          <span className="material-icons text-sm">delete</span>
+          <MdDelete className="text-sm" />
         </button>
       </div>
     </div>
@@ -184,18 +195,18 @@ export default function SavedConnections({
                     className="flex items-center gap-1.5 py-1.5 px-2 rounded cursor-pointer transition-colors select-none df-hover"
                     onClick={() => toggleGroup(grp.id)}
                   >
-                    <span
-                      className="material-icons text-xs transition-transform"
+                    <MdExpandMore
+                      className="text-xs transition-transform"
                       style={{
                         color: "var(--df-text-dimmed)",
                         transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
                       }}
-                    >
-                      expand_more
-                    </span>
-                    <span className="material-icons text-sm text-amber-500/70">
-                      {collapsed ? "folder" : "folder_open"}
-                    </span>
+                    />
+                    {collapsed ? (
+                      <MdFolder className="text-sm text-amber-500/70" />
+                    ) : (
+                      <MdFolderOpen className="text-sm text-amber-500/70" />
+                    )}
                     <span
                       className="text-[11px] font-medium flex-1 truncate"
                       style={{ color: "var(--df-text-muted)" }}

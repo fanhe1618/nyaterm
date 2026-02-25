@@ -11,20 +11,6 @@ import { invoke } from "../lib/invoke";
 import { logger } from "../lib/logger";
 import type { AppSettings, Group, SavedConnection, SessionType, Tab, UiConfig } from "../types";
 
-export interface ContextMenuItem {
-  icon?: string;
-  label: string;
-  color?: string;
-  onClick: () => void;
-  divider?: boolean;
-}
-
-export interface ContextMenuState {
-  x: number;
-  y: number;
-  items: ContextMenuItem[];
-}
-
 interface AppContextType {
   // Tabs
   tabs: Tab[];
@@ -54,10 +40,9 @@ interface AppContextType {
   showSettingsDialog: boolean;
   setShowSettingsDialog: (show: boolean) => void;
 
-  // Global Context Menu
-  contextMenu: ContextMenuState | null;
-  showContextMenu: (state: ContextMenuState) => void;
-  hideContextMenu: () => void;
+  // Idle Lock
+  isLocked: boolean;
+  setIsLocked: (locked: boolean) => void;
 }
 
 /**
@@ -164,17 +149,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
-  // Global Context Menu State
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-
-  const showContextMenu = useCallback((state: ContextMenuState) => {
-    setContextMenu(state);
-  }, []);
-
-  const hideContextMenu = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
+  // Idle Lock State
+  const [isLocked, setIsLocked] = useState(false);
   // 1. Load UI Config
   useEffect(() => {
     invoke<UiConfig>("get_ui_config")
@@ -253,16 +229,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshConnections]);
 
   // 4. Tab Logic
-  const addTab = useCallback((sessionId: string, name: string, type: SessionType, connectionId?: string) => {
-    const tabId = `tab-${Date.now()}`;
-    const newTab: Tab = { id: tabId, sessionId, name, type, connectionId };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(tabId);
+  const addTab = useCallback(
+    (sessionId: string, name: string, type: SessionType, connectionId?: string) => {
+      const tabId = `tab-${Date.now()}`;
+      const newTab: Tab = { id: tabId, sessionId, name, type, connectionId };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(tabId);
 
-    // Close dialogs when session starts
-    setShowNewSession(false);
-    setEditingConnection(undefined);
-  }, []);
+      // Close dialogs when session starts
+      setShowNewSession(false);
+      setEditingConnection(undefined);
+    },
+    [],
+  );
 
   const closeTab = useCallback(
     (tabId: string) => {
@@ -286,16 +265,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hasRestored.current && uiConfigLoaded.current && appSettingsLoaded.current) {
       hasRestored.current = true;
-      if (appSettings.general.startup_restore && uiConfig.open_tabs && uiConfig.open_tabs.length > 0) {
-        uiConfig.open_tabs.forEach(tab => {
+      if (
+        appSettings.general.startup_restore &&
+        uiConfig.open_tabs &&
+        uiConfig.open_tabs.length > 0
+      ) {
+        uiConfig.open_tabs.forEach((tab) => {
           if (tab.session_type === "SSH" && tab.connection_id) {
-            invoke<string>("create_ssh_session", { connectionId: tab.connection_id }).then(sessionId => {
-              addTab(sessionId, tab.title, "SSH", tab.connection_id);
-            }).catch(e => logger.error(`Restore SSH failed for ${tab.title}`, e));
+            invoke<string>("create_ssh_session", { connectionId: tab.connection_id })
+              .then((sessionId) => {
+                addTab(sessionId, tab.title, "SSH", tab.connection_id);
+              })
+              .catch((e) => logger.error(`Restore SSH failed for ${tab.title}`, e));
           } else if (tab.session_type === "Local" || tab.session_type === "local") {
-            invoke<string>("create_local_session").then(sessionId => {
-              addTab(sessionId, tab.title, "Local");
-            }).catch(e => logger.error(`Restore Local failed`, e));
+            invoke<string>("create_local_session")
+              .then((sessionId) => {
+                addTab(sessionId, tab.title, "Local");
+              })
+              .catch((e) => logger.error(`Restore Local failed`, e));
           }
         });
       }
@@ -306,11 +293,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hasRestored.current && appSettings.general.startup_restore) {
       updateUiConfig({
-        open_tabs: tabs.map(t => ({
+        open_tabs: tabs.map((t) => ({
           title: t.name,
           session_type: t.type,
-          connection_id: t.connectionId
-        }))
+          connection_id: t.connectionId,
+        })),
       });
     }
   }, [tabs, appSettings.general.startup_restore, updateUiConfig]);
@@ -336,9 +323,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setEditingConnection,
         showSettingsDialog,
         setShowSettingsDialog,
-        contextMenu,
-        showContextMenu,
-        hideContextMenu,
+        isLocked,
+        setIsLocked,
       }}
     >
       {children}

@@ -88,6 +88,12 @@ export interface QuickCommand {
   id: string;
   label: string;
   command: string;
+  category?: string;
+  description?: string;
+  color_tag?: string;
+  icon_tag?: string;
+  pinned?: boolean;
+  execution_mode?: string;
 }
 
 /** Fuzzy search result with matched command and highlight indices. */
@@ -140,6 +146,7 @@ export interface SecuritySettings {
   use_os_keyring: boolean;
   require_master_password: boolean;
   idle_lock_minutes: number;
+  lock_password?: string;
   host_key_policy: string;
 }
 

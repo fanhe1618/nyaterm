@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { memo, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MdChevronRight, MdHistory } from "react-icons/md";
 
 interface CommandHistoryProps {
   onCommandSend: (command: string) => void;
@@ -44,12 +45,10 @@ function CommandHistory({ onCommandSend }: CommandHistoryProps) {
         }}
       >
         <span>{t("panel.commandHistory")}</span>
-        <span
-          className="material-icons text-sm cursor-pointer hover:opacity-80 transition-opacity"
+        <MdHistory
+          className="text-sm cursor-pointer hover:opacity-80 transition-opacity"
           style={{ color: "var(--df-text-muted)" }}
-        >
-          history
-        </span>
+        />
       </div>
       <div className="flex-1 overflow-y-auto p-2 text-xs font-mono space-y-0.5 terminal-scroll">
         {history.length === 0 ? (
@@ -68,12 +67,10 @@ function CommandHistory({ onCommandSend }: CommandHistoryProps) {
               title={cmd}
               onDoubleClick={() => handleDoubleClick(cmd)}
             >
-              <span
-                className="material-icons text-[10px] transition-colors"
+              <MdChevronRight
+                className="text-[10px] transition-colors"
                 style={{ color: "var(--df-text-dimmed)" }}
-              >
-                chevron_right
-              </span>
+              />
               <span className="truncate">{cmd}</span>
             </div>
           ))
