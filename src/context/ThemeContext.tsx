@@ -11,12 +11,14 @@ interface ThemeContextType {
 
 /**
  * Theme state: current theme object and name. setTheme updates local state and
- * persists via updateUiConfig. CSS vars applied to :root on theme change.
+ * persists via updateAppSettings. CSS vars applied to :root on theme change.
  */
 const ThemeContext = createContext<ThemeContextType | null>(null);
 
+export const THEME_CACHE_KEY = "df-theme-id";
+
 /** Inject all theme colors as CSS custom properties on :root */
-function applyThemeToDOM(colors: ThemeColors) {
+export function applyThemeToDOM(colors: ThemeColors) {
   const root = document.documentElement.style;
   root.setProperty("--df-bg", colors.bg);
   root.setProperty("--df-bg-panel", colors.bgPanel);
@@ -42,9 +44,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const current = themes[themeName] || themes[DEFAULT_THEME_ID];
 
-  // Apply CSS vars whenever theme changes
+  // Apply CSS vars whenever theme changes and cache the ID
   useEffect(() => {
     applyThemeToDOM(current.colors);
+    try { localStorage.setItem(THEME_CACHE_KEY, current.id); } catch {}
   }, [current]);
 
   // Sync from backend when appSettings.appearance.theme changes (e.g. on load or from Settings dialog)
