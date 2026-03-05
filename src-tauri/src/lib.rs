@@ -135,6 +135,7 @@ pub fn run() {
             commands::session_cmds::add_command_history,
             commands::session_cmds::get_command_history,
             commands::session_cmds::fuzzy_search_history,
+            commands::session_cmds::fuzzy_search_commands,
             commands::sftp_cmds::get_home_dir,
             commands::sftp_cmds::list_remote_dir,
             commands::sftp_cmds::delete_remote_file,

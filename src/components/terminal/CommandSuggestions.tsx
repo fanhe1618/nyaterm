@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { MdChevronRight, MdHistory } from "react-icons/md";
+import { MdFlashOn, MdHistory, MdTipsAndUpdates } from "react-icons/md";
 import type { FuzzyResult } from "../../types";
 
 interface CommandSuggestionsProps {
@@ -12,19 +12,25 @@ interface CommandSuggestionsProps {
   onDismiss: () => void;
 }
 
+/** Per-source icon used as a prefix to distinguish item origins. */
+const SOURCE_ICON: Record<string, React.ElementType> = {
+  history: MdHistory,
+  quickCommand: MdFlashOn,
+};
+
 /** Render a single suggestion with matched characters highlighted. */
-function HighlightedCommand({ command, indices }: { command: string; indices: number[] }) {
+function HighlightedCommand({ text, indices }: { text: string; indices: number[] }) {
   const indexSet = new Set(indices);
   const parts: { text: string; highlighted: boolean }[] = [];
 
   let i = 0;
-  while (i < command.length) {
+  while (i < text.length) {
     const isHighlighted = indexSet.has(i);
     let j = i + 1;
-    while (j < command.length && indexSet.has(j) === isHighlighted) {
+    while (j < text.length && indexSet.has(j) === isHighlighted) {
       j++;
     }
-    parts.push({ text: command.slice(i, j), highlighted: isHighlighted });
+    parts.push({ text: text.slice(i, j), highlighted: isHighlighted });
     i = j;
   }
 
@@ -45,7 +51,7 @@ function HighlightedCommand({ command, indices }: { command: string; indices: nu
   );
 }
 
-/** Popup list of fuzzy-matched history suggestions. Arrow keys, Enter, Tab, Esc. */
+/** Popup list of fuzzy-matched suggestions from multiple providers. */
 function CommandSuggestions({
   suggestions,
   visible,
@@ -63,7 +69,7 @@ function CommandSuggestions({
     if (selectedRef.current) {
       selectedRef.current.scrollIntoView({ block: "nearest" });
     }
-  }, []);
+  }, [selectedIndex]);
 
   if (!visible || suggestions.length === 0) {
     return null;
@@ -91,43 +97,47 @@ function CommandSuggestions({
         e.preventDefault();
       }}
     >
+      {/* Unified header */}
       <div
         className="px-2 py-1.5 text-[0.625rem] uppercase tracking-wider border-b flex items-center gap-1.5"
         style={{ color: "var(--df-text-dimmed)", borderColor: "var(--df-border)" }}
       >
-        <MdHistory className="text-[0.75rem]" />
-        <span>{t("suggestions.history")}</span>
+        <MdTipsAndUpdates className="text-[0.75rem]" />
+        <span>{t("suggestions.title")}</span>
         <span className="ml-auto" style={{ color: "var(--df-text-dimmed)" }}>
           {suggestions.length}{" "}
           {suggestions.length !== 1 ? t("suggestions.matches") : t("suggestions.match")}
         </span>
       </div>
 
-      {suggestions.map((result, index) => (
-        <div
-          key={`${result.command}-${index}`}
-          ref={index === selectedIndex ? selectedRef : null}
-          className={`px-3 py-1.5 cursor-pointer flex items-center gap-2 transition-colors border-l-2 ${
-            index === selectedIndex ? "" : "border-transparent"
-          } ${index !== selectedIndex ? "df-hover" : ""}`}
-          style={{
-            backgroundColor:
-              index === selectedIndex
-                ? "color-mix(in srgb, var(--df-primary) 20%, transparent)"
-                : undefined,
-            borderLeftColor: index === selectedIndex ? "var(--df-primary)" : "transparent",
-          }}
-          onClick={() => onSelect(result.command)}
-        >
-          <MdChevronRight
-            className="text-[0.75rem] shrink-0"
+      {/* Items — prefix icon distinguishes source */}
+      {suggestions.map((result, index) => {
+        const Icon = SOURCE_ICON[result.source] ?? MdHistory;
+        return (
+          <div
+            key={`${result.source}-${result.display}-${index}`}
+            ref={index === selectedIndex ? selectedRef : null}
+            className={`px-3 py-1.5 cursor-pointer flex items-center gap-2 transition-colors border-l-2 ${index === selectedIndex ? "" : "border-transparent"
+              } ${index !== selectedIndex ? "df-hover" : ""}`}
             style={{
-              color: index === selectedIndex ? "var(--df-accent)" : "var(--df-text-dimmed)",
+              backgroundColor:
+                index === selectedIndex
+                  ? "color-mix(in srgb, var(--df-primary) 20%, transparent)"
+                  : undefined,
+              borderLeftColor: index === selectedIndex ? "var(--df-primary)" : "transparent",
             }}
-          />
-          <HighlightedCommand command={result.command} indices={result.indices} />
-        </div>
-      ))}
+            onClick={() => onSelect(result.command)}
+          >
+            <Icon
+              className="text-[0.75rem] shrink-0"
+              style={{
+                color: index === selectedIndex ? "var(--df-accent)" : "var(--df-text-dimmed)",
+              }}
+            />
+            <HighlightedCommand text={result.display} indices={result.indices} />
+          </div>
+        );
+      })}
 
       <div
         className="px-2 py-1 border-t flex items-center gap-3 text-[0.625rem]"

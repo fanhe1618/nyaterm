@@ -18,6 +18,10 @@ pub struct FuzzyResult {
     pub command: String,
     pub score: u32,
     pub indices: Vec<u32>,
+    /// Provider tag: "history", "quickCommand", etc.
+    pub source: String,
+    /// Text shown in the suggestion panel (may differ from `command`).
+    pub display: String,
 }
 
 /// In-memory history store with dedup, persistence, and nucleo-based fuzzy search.
@@ -104,52 +108,75 @@ impl CommandHistoryStore {
     /// Returns top `limit` results sorted by score (highest first).
     /// At equal scores, more recent commands rank higher.
     pub fn search(&self, pattern_str: &str, limit: usize) -> Vec<FuzzyResult> {
-        let pattern_str = pattern_str.trim();
-        if pattern_str.is_empty() {
-            return Vec::new();
-        }
-
-        let pattern = Pattern::new(
-            pattern_str,
-            CaseMatching::Smart,
-            Normalization::Smart,
-            AtomKind::Fuzzy,
-        );
-
-        if pattern.atoms.is_empty() {
-            return Vec::new();
-        }
-
-        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
-        let mut buf = Vec::new();
-
-        let mut scored: Vec<(usize, u32)> = Vec::new();
-        for (idx, cmd) in self.commands.iter().enumerate() {
-            let haystack = Utf32Str::new(cmd, &mut buf);
-            if let Some(score) = pattern.score(haystack, &mut matcher) {
-                scored.push((idx, score));
-            }
-        }
-
-        scored.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
-        scored.truncate(limit);
-
-        let mut results = Vec::with_capacity(scored.len());
-        for (idx, score) in scored {
-            let cmd = &self.commands[idx];
-            let haystack = Utf32Str::new(cmd, &mut buf);
-            let mut indices = Vec::new();
-            pattern.indices(haystack, &mut matcher, &mut indices);
-            indices.sort_unstable();
-            indices.dedup();
-
-            results.push(FuzzyResult {
-                command: cmd.clone(),
-                score,
-                indices,
-            });
-        }
-
-        results
+        let items: Vec<(String, String)> = self
+            .commands
+            .iter()
+            .map(|c| (c.clone(), c.clone()))
+            .collect();
+        fuzzy_search_items(&items, pattern_str, "history", limit)
     }
+}
+
+/// Generic fuzzy search over `(display_text, value)` pairs.
+///
+/// Matches against `display_text` (shown in the suggestion panel).
+/// `value` is stored as `command` in the result (used when filling/executing).
+/// `source` tags every result so the frontend can distinguish providers.
+///
+/// This is the shared primitive that any suggestion provider should use.
+pub fn fuzzy_search_items(
+    items: &[(String, String)],
+    pattern_str: &str,
+    source: &str,
+    limit: usize,
+) -> Vec<FuzzyResult> {
+    let pattern_str = pattern_str.trim();
+    if pattern_str.is_empty() {
+        return Vec::new();
+    }
+
+    let pattern = Pattern::new(
+        pattern_str,
+        CaseMatching::Smart,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    );
+
+    if pattern.atoms.is_empty() {
+        return Vec::new();
+    }
+
+    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+    let mut buf = Vec::new();
+
+    let mut scored: Vec<(usize, u32)> = Vec::new();
+    for (idx, (display, _value)) in items.iter().enumerate() {
+        let haystack = Utf32Str::new(display, &mut buf);
+        if let Some(score) = pattern.score(haystack, &mut matcher) {
+            scored.push((idx, score));
+        }
+    }
+
+    scored.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
+    scored.truncate(limit);
+
+    let mut results = Vec::with_capacity(scored.len());
+    for (idx, score) in scored {
+        let (display, value) = &items[idx];
+        let haystack = Utf32Str::new(display, &mut buf);
+        let mut indices = Vec::new();
+        pattern.indices(haystack, &mut matcher, &mut indices);
+        indices.sort_unstable();
+        indices.dedup();
+
+        results.push(FuzzyResult {
+            command: value.clone(),
+            score,
+            indices,
+            source: source.to_string(),
+            display: display.clone(),
+        });
+    }
+
+    results
 }

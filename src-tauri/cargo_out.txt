@@ -1,0 +1,61 @@
+    Checking dragonfly v0.1.0 (E:\Projects\Tauri\dragonfly\src-tauri)
+error[E0603]: module `quick_commands` is private
+ --> src\fuzzy.rs:5:20
+  |
+5 | use crate::config::quick_commands::QuickCommand;
+  |                    ^^^^^^^^^^^^^^ private module
+  |
+note: the module `quick_commands` is defined here
+ --> src\config\mod.rs:6:1
+  |
+6 | mod quick_commands;
+  | ^^^^^^^^^^^^^^^^^^^
+
+error[E0603]: module `quick_commands` is private
+   --> src\commands\session_cmds.rs:160:36
+    |
+160 |     let qc_config = crate::config::quick_commands::load_quick_commands(&app).unwrap_or_default();
+    |                                    ^^^^^^^^^^^^^^ private module
+    |
+note: the module `quick_commands` is defined here
+   --> src\config\mod.rs:6:1
+    |
+  6 | mod quick_commands;
+    | ^^^^^^^^^^^^^^^^^^^
+help: consider importing this function through its public re-export instead
+    |
+160 -     let qc_config = crate::config::quick_commands::load_quick_commands(&app).unwrap_or_default();
+160 +     let qc_config = crate::config::load_quick_commands(&app).unwrap_or_default();
+    |
+
+error[E0603]: module `quick_commands` is private
+   --> src\session.rs:146:42
+    |
+146 |         quick_commands: &[crate::config::quick_commands::QuickCommand],
+    |                                          ^^^^^^^^^^^^^^ private module
+    |
+note: the module `quick_commands` is defined here
+   --> src\config\mod.rs:6:1
+    |
+  6 | mod quick_commands;
+    | ^^^^^^^^^^^^^^^^^^^
+help: consider importing this struct through its public re-export instead
+    |
+146 -         quick_commands: &[crate::config::quick_commands::QuickCommand],
+146 +         quick_commands: &[crate::config::QuickCommand],
+    |
+
+error[E0308]: mismatched types
+   --> src\fuzzy.rs:168:17
+    |
+168 |                 display,
+    |                 ^^^^^^^ expected `String`, found `str`
+    |
+help: try using a conversion method
+    |
+168 |                 display: display.to_string(),
+    |                 ++++++++        ++++++++++++
+
+Some errors have detailed explanations: E0308, E0603.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `dragonfly` (lib) due to 4 previous errors

@@ -143,6 +143,10 @@ export interface FuzzyResult {
   command: string;
   score: number;
   indices: number[];
+  /** Provider tag: "history" | "quickCommand" | future sources. */
+  source: string;
+  /** Text shown in the suggestion panel (may differ from command). */
+  display: string;
 }
 
 export interface GeneralSettings {

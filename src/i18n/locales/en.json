@@ -190,7 +190,7 @@
     "createCategory": "Create \"{{name}}\""
   },
   "suggestions": {
-    "history": "History",
+    "title": "Suggestions",
     "match": "match",
     "matches": "matches",
     "select": "select",

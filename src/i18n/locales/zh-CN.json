@@ -190,7 +190,7 @@
     "createCategory": "创建 \"{{name}}\""
   },
   "suggestions": {
-    "history": "历史记录",
+    "title": "联想补全",
     "match": "条匹配",
     "matches": "条匹配",
     "select": "选择",

@@ -1,6 +1,6 @@
 use crate::config;
 use crate::error::{AppError, AppResult};
-use crate::fuzzy::FuzzyResult;
+use crate::fuzzy::{fuzzy_search_items, FuzzyResult};
 use crate::pty;
 use crate::session::{SessionCommand, SessionInfo, SessionManager};
 use crate::ssh::{self, SshAuth, SshConfig};
@@ -157,4 +157,19 @@ pub async fn fuzzy_search_history(
     limit: usize,
 ) -> AppResult<Vec<FuzzyResult>> {
     Ok(state.fuzzy_search(&pattern, limit).await)
+}
+
+#[tauri::command]
+pub fn fuzzy_search_commands(
+    app: tauri::AppHandle,
+    pattern: String,
+    limit: usize,
+) -> AppResult<Vec<FuzzyResult>> {
+    let cfg = config::load_quick_commands(&app)?;
+    let items: Vec<(String, String)> = cfg
+        .commands
+        .into_iter()
+        .map(|c| (c.label, c.command))
+        .collect();
+    Ok(fuzzy_search_items(&items, &pattern, "quickCommand", limit))
 }

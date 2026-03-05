@@ -72,18 +72,26 @@ export function useCommandHistory(
         return;
       }
       try {
-        const results = await invoke<FuzzyResult[]>("fuzzy_search_history", {
-          pattern,
-          limit: 8,
-        });
-        suggestionsRef.current = results;
-        selectedIndexRef.current = -1;
-        showSuggestionsRef.current = results.length > 0;
-        setSuggestions(results);
-        setSelectedIndex(-1);
-        setShowSuggestions(results.length > 0);
+        // Parallel search across all suggestion providers.
+        // To add a new provider, append another invoke() call here.
+        const [historyResults, commandResults] = await Promise.all([
+          invoke<FuzzyResult[]>("fuzzy_search_history", { pattern, limit: 8 }),
+          invoke<FuzzyResult[]>("fuzzy_search_commands", { pattern, limit: 8 }),
+        ]);
 
-        if (results.length > 0) {
+        // Merge, sort by score descending, and cap total
+        const merged = [...historyResults, ...commandResults]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 12);
+
+        suggestionsRef.current = merged;
+        selectedIndexRef.current = -1;
+        showSuggestionsRef.current = merged.length > 0;
+        setSuggestions(merged);
+        setSelectedIndex(-1);
+        setShowSuggestions(merged.length > 0);
+
+        if (merged.length > 0) {
           setCursorPosition(getCursorViewportPosition());
         }
       } catch {
@@ -99,8 +107,8 @@ export function useCommandHistory(
       invoke("write_to_session", {
         sessionId,
         data: `${eraseChars + command}\r`,
-      }).catch(() => {});
-      invoke("add_command_history", { sessionId, command }).catch(() => {});
+      }).catch(() => { });
+      invoke("add_command_history", { sessionId, command }).catch(() => { });
       currentLineRef.current = "";
       shellIntegrationRef.current.fallbackNeedsDetection = true;
 
