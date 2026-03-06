@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { MdAdd, MdClose, MdDns, MdTerminal } from "react-icons/md";
 import { CONNECTION_ICONS } from "../icons";
 import { useApp } from "../../context/AppContext";
-import type { Tab } from "@/lib/types";
+import type { Tab } from "@/types/global";
 
 interface TabBarProps {
   tabs: Tab[];

@@ -13,7 +13,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import type { SavedConnection } from "@/lib/types";
+import type { SavedConnection } from "@/types/global";
 import { CONNECTION_ICONS } from "../../icons";
 import { useSavedConnectionsContext } from "./context";
 

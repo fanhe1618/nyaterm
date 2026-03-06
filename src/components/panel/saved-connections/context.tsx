@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { TFunction } from "i18next";
-import type { Group, SavedConnection } from "@/lib/types";
+import type { Group, SavedConnection } from "@/types/global";
 
 // ── Component-local types ─────────────────────────────────────────────────
 

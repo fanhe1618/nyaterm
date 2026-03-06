@@ -20,7 +20,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { QUICK_ICONS } from "@/components/icons";
-import type { QuickCommand, QuickCommandCategory } from "@/lib/types";
+import type { QuickCommand, QuickCommandCategory } from "@/types/global";
 import { invoke } from "@tauri-apps/api/core";
 
 interface QuickCommandsConfig {

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Terminal } from "@xterm/xterm";
 import { useCallback, useRef, useState } from "react";
 import type { ShellIntegrationState } from "@/hooks/useShellIntegration";
-import type { FuzzyResult } from "@/lib/types";
+import type { FuzzyResult } from "@/types/global";
 
 export function useCommandHistory(
   sessionId: string,

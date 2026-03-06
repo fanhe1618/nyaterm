@@ -22,7 +22,7 @@ import { TransferProvider } from "./context/TransferContext";
 import { useIdleLock } from "./hooks/useIdleLock";
 import { invoke } from "./lib/invoke";
 import { openNewSession } from "./lib/windowManager";
-import type { AppSettings, PanelId, PanelLayout, SavedConnection, UiConfig } from "./lib/types";
+import type { AppSettings, PanelId, PanelLayout, SavedConnection, UiConfig } from "./types/global";
 
 const PANEL_VISIBILITY: Record<PanelId, keyof UiConfig & `show_${string}`> = {
   fileExplorer: "show_file_explorer",

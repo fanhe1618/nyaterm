@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MdFlashOn, MdHistory, MdTipsAndUpdates } from "react-icons/md";
-import type { FuzzyResult } from "@/lib/types";
+import type { FuzzyResult } from "@/types/global";
 
 interface CommandSuggestionsProps {
   suggestions: FuzzyResult[];

@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { QuickCommand, QuickCommandCategory, QuickCommandsConfig } from "@/lib/types";
+import type { QuickCommand, QuickCommandCategory, QuickCommandsConfig } from "@/types/global";
 import { openQuickCommand } from "../../lib/windowManager";
 import VariablePromptDialog, {
   parseCommandVariables,

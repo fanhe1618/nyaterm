@@ -4,7 +4,7 @@ import i18n from "../i18n";
 import { AppContext } from "./AppContext";
 import { invoke } from "../lib/invoke";
 import { logger } from "../lib/logger";
-import type { AppSettings, Group, SavedConnection, UiConfig } from "@/lib/types";
+import type { AppSettings, Group, SavedConnection, UiConfig } from "@/types/global";
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   general: {

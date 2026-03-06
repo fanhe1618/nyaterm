@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { memo, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { SessionInfo } from "@/lib/types";
+import type { SessionInfo } from "@/types/global";
 
 interface ActiveSessionsProps {
   onSessionClick: (sessionId: string) => void;

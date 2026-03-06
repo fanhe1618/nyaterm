@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MdLock, MdMemory, MdSpeed } from "react-icons/md";
 import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
-import type { RemoteStats } from "@/lib/types";
+import type { RemoteStats } from "@/types/global";
 
 const STATS_POLL_INTERVAL_MS = 10_000;
 

@@ -27,7 +27,7 @@ import {
 import { useApp } from "../../context/AppContext";
 import { invoke } from "../../lib/invoke";
 import { logger } from "../../lib/logger";
-import type { Group, SavedConnection } from "@/lib/types";
+import type { Group, SavedConnection } from "@/types/global";
 import { SavedConnectionsContext } from "./saved-connections/context";
 import type { SavedConnectionsContextValue } from "./saved-connections/context";
 import GroupNodeItem from "./saved-connections/GroupNodeItem";

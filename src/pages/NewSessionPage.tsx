@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
 import { Textarea } from "@/components/ui/textarea";
 import { openSettings } from "@/lib/windowManager";
-import type { Group, SavedConnection, SshKey } from "@/lib/types";
+import type { Group, SavedConnection, SshKey } from "@/types/global";
 
 export default function NewSessionPage() {
   const { t } = useTranslation();

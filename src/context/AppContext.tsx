@@ -10,7 +10,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "../lib/invoke";
 import { logger } from "../lib/logger";
-import type { AppSettings, Group, SavedConnection, SessionType, Tab, UiConfig } from "@/lib/types";
+import type { AppSettings, Group, SavedConnection, SessionType, Tab, UiConfig } from "@/types/global";
 
 interface AppContextType {
   // Tabs

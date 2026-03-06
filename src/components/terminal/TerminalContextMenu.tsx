@@ -15,7 +15,7 @@ import {
   MdTravelExplore,
 } from "react-icons/md";
 import { useApp } from "@/context/AppContext";
-import type { SearchEngine } from "@/lib/types";
+import type { SearchEngine } from "@/types/global";
 import { SEARCH_ICONS, type QuickIconDef } from "../icons";
 import TranslationDialog from "../dialog/terminal/TranslationDialog";
 import {
