@@ -123,3 +123,39 @@ pub async fn chmod_remote_file(
 ) -> AppResult<()> {
     sftp::chmod_remote_file(state.inner().clone(), &session_id, &path, &mode).await
 }
+
+#[tauri::command]
+pub async fn download_remote_directory(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+) -> AppResult<()> {
+    sftp::download_remote_directory(
+        app,
+        state.inner().clone(),
+        &session_id,
+        &remote_path,
+        &local_path,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn upload_local_directory(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    local_path: String,
+    remote_path: String,
+) -> AppResult<()> {
+    sftp::upload_local_directory(
+        app,
+        state.inner().clone(),
+        &session_id,
+        &local_path,
+        &remote_path,
+    )
+    .await
+}

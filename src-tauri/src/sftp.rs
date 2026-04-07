@@ -678,6 +678,108 @@ pub async fn chmod_remote_file(
     Ok(())
 }
 
+/// Recursively downloads a remote directory to a local path, preserving structure.
+/// Emits per-file `transfer-event` payloads so the transfer panel tracks progress.
+pub async fn download_remote_directory(
+    app: tauri::AppHandle,
+    manager: Arc<SessionManager>,
+    session_id: &str,
+    remote_path: &str,
+    local_path: &str,
+) -> AppResult<()> {
+    tokio::fs::create_dir_all(local_path)
+        .await
+        .map_err(|e| AppError::Channel(format!("Failed to create local dir: {}", e)))?;
+
+    let entries = list_remote_dir(manager.clone(), session_id, remote_path).await?;
+
+    for entry in entries {
+        let child_remote = format!("{}/{}", remote_path.trim_end_matches('/'), entry.name);
+        let child_local = format!("{}/{}", local_path.trim_end_matches('/'), entry.name);
+
+        if entry.is_dir {
+            Box::pin(download_remote_directory(
+                app.clone(),
+                manager.clone(),
+                session_id,
+                &child_remote,
+                &child_local,
+            ))
+            .await?;
+        } else if !entry.is_symlink {
+            download_remote_file(
+                app.clone(),
+                manager.clone(),
+                session_id,
+                &child_remote,
+                &child_local,
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Recursively uploads a local directory to a remote path, preserving structure.
+/// Emits per-file `transfer-event` payloads so the transfer panel tracks progress.
+pub async fn upload_local_directory(
+    app: tauri::AppHandle,
+    manager: Arc<SessionManager>,
+    session_id: &str,
+    local_path: &str,
+    remote_path: &str,
+) -> AppResult<()> {
+    // Create the remote directory
+    let sftp = open_sftp(&manager, session_id).await?;
+    let _ = sftp.create_dir(remote_path).await;
+    let _ = sftp.close().await;
+
+    let mut read_dir = tokio::fs::read_dir(local_path)
+        .await
+        .map_err(|e| AppError::Channel(format!("Failed to read local dir: {}", e)))?;
+
+    while let Some(entry) = read_dir
+        .next_entry()
+        .await
+        .map_err(|e| AppError::Channel(format!("Failed to read dir entry: {}", e)))?
+    {
+        let file_type = entry
+            .file_type()
+            .await
+            .map_err(|e| AppError::Channel(format!("Failed to get file type: {}", e)))?;
+        let entry_name = entry.file_name().to_string_lossy().to_string();
+        let child_local = format!(
+            "{}/{}",
+            local_path.trim_end_matches(['/', '\\']),
+            entry_name
+        );
+        let child_remote = format!("{}/{}", remote_path.trim_end_matches('/'), entry_name);
+
+        if file_type.is_dir() {
+            Box::pin(upload_local_directory(
+                app.clone(),
+                manager.clone(),
+                session_id,
+                &child_local,
+                &child_remote,
+            ))
+            .await?;
+        } else if file_type.is_file() {
+            upload_local_file(
+                app.clone(),
+                manager.clone(),
+                session_id,
+                &child_local,
+                &child_remote,
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn get_file_properties(
     manager: Arc<SessionManager>,
     session_id: &str,
