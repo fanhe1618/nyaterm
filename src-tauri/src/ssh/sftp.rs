@@ -4,7 +4,7 @@
 //! creating a new TCP connection for each operation.
 
 use crate::error::{AppError, AppResult};
-use crate::session::SessionManager;
+use crate::runtime::SessionManager;
 use crate::ssh::SshHandler;
 use russh::client;
 use russh_sftp::client::SftpSession;

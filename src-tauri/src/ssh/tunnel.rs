@@ -179,7 +179,7 @@ impl TunnelManager {
         shutdown_rx: oneshot::Receiver<()>,
     ) {
         {
-            let mut handle = ssh_handle.lock().await;
+            let handle = ssh_handle.lock().await;
             if let Err(e) = handle.tcpip_forward(&listen_addr, listen_port.into()).await {
                 tracing::warn!("tcpip_forward request failed: {}", e);
                 return;

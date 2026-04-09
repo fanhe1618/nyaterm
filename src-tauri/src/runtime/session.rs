@@ -28,6 +28,10 @@ pub struct SessionInfo {
     pub name: String,
     pub session_type: SessionType,
     pub connected: bool,
+    /// True when OSC 7 shell integration was successfully injected.
+    /// False for non-standard shells (e.g. JumpServer) where CWD tracking is unavailable.
+    #[serde(default)]
+    pub injection_active: bool,
 }
 
 /// Commands sent from the frontend to a session's I/O loop.
@@ -51,7 +55,7 @@ pub struct SessionHandle {
     pub ssh_config: Option<Arc<dyn Any + Send + Sync>>,
     /// SSH-specific: authenticated `client::Handle` for channel multiplexing (SFTP, exec).
     pub ssh_handle: Option<Arc<dyn Any + Send + Sync>>,
-    /// Current working directory updated via OSC 7 (shell integration)
+    /// Current working directory updated via OSC 7 (shell integration).
     pub cwd: SharedCwd,
 }
 

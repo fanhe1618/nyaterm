@@ -2,11 +2,11 @@
 //!
 //! Spawns the user's shell (PowerShell on Windows, $SHELL elsewhere) and bridges I/O to Tauri.
 
-use crate::error::AppResult;
-use crate::recording::RecordingManager;
-use crate::session::{
+use super::recording::RecordingManager;
+use super::session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
+use crate::error::AppResult;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -93,6 +93,7 @@ pub async fn create_local_session(
         name: "Local Terminal".to_string(),
         session_type: SessionType::Local,
         connected: true,
+        injection_active: false,
     };
 
     let cwd: SharedCwd = Arc::new(tokio::sync::Mutex::new(None));
