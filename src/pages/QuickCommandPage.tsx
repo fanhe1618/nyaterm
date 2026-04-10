@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdAdd } from "react-icons/md";
 import { QUICK_ICONS } from "@/components/icons";
@@ -110,15 +110,15 @@ export default function QuickCommandPage() {
   const handleClose = () => getCurrentWindow().close();
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
+    <div className="h-full min-h-0 flex flex-col overflow-hidden bg-background text-foreground">
       <ChildWindowHeader
         title={initialData ? t("quickCommands.editCommand") : t("quickCommands.addCommand")}
         onClose={handleClose}
       />
 
-      <div className="flex-1 p-5 space-y-5 overflow-y-auto terminal-scroll">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 space-y-1.5">
+      <div className="terminal-scroll flex-1 min-h-0 space-y-5 overflow-y-auto p-4 sm:p-5">
+        <div className="flex flex-col gap-4 md:flex-row">
+          <div className="min-w-0 flex-1 space-y-1.5">
             <div className="flex justify-between items-center">
               <Label htmlFor="qc-label" className="text-xs text-muted-foreground">
                 {t("quickCommands.labelName")}
@@ -139,7 +139,7 @@ export default function QuickCommandPage() {
             />
           </div>
 
-          <div className="flex-1 space-y-1.5">
+          <div className="min-w-0 flex-1 space-y-1.5">
             <Label htmlFor="qc-category" className="text-xs text-muted-foreground">
               {t("quickCommands.category")}
             </Label>
@@ -245,10 +245,10 @@ export default function QuickCommandPage() {
         </div>
 
         {/* Color Tag & Pinned */}
-        <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
-          <div className="flex-1 space-y-2">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <div className="min-w-0 flex-1 space-y-2">
             <Label className="text-xs text-muted-foreground">{t("quickCommands.colorTag")}</Label>
-            <div className="flex gap-2 h-9 items-center">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {THEME_COLORS.map((color) => (
                 <button
                   key={color}
@@ -302,7 +302,7 @@ export default function QuickCommandPage() {
               </DropdownMenu>
             </div>
           </div>
-          <div className="flex-1 flex items-center sm:justify-end gap-2 h-9">
+          <div className="flex items-center gap-2 lg:flex-1 lg:justify-end lg:pb-1">
             <Switch checked={pinned} onCheckedChange={setPinned} id="qc-pinned" />
             <Label htmlFor="qc-pinned" className="text-sm cursor-pointer select-none">
               {t("quickCommands.pin")}
@@ -315,7 +315,7 @@ export default function QuickCommandPage() {
           <Label className="text-xs text-muted-foreground">
             {t("quickCommands.executionMode")}
           </Label>
-          <div className="flex p-1 gap-1 bg-muted/40 rounded-md border items-center">
+          <div className="flex flex-col gap-1 rounded-md border bg-muted/40 p-1 sm:flex-row sm:items-center">
             <Button
               type="button"
               variant={executionMode === "execute" ? "secondary" : "ghost"}
@@ -355,7 +355,7 @@ export default function QuickCommandPage() {
           <Textarea
             id="qc-command"
             className={`font-mono text-sm resize-none h-28 bg-muted/30 ${errors.command ? "border-destructive focus-visible:ring-destructive" : ""}`}
-            style={{ fieldSizing: "fixed" } as any}
+            style={{ fieldSizing: "fixed" } as CSSProperties}
             placeholder={t("quickCommands.commandPlaceholder")}
             value={command}
             onChange={(e) => {
@@ -373,11 +373,16 @@ export default function QuickCommandPage() {
       </div>
 
       {/* Footer */}
-      <div className="px-5 py-4 border-t bg-muted/20 flex justify-end gap-2 shrink-0">
-        <Button variant="ghost" size="sm" className="text-sm h-9 px-4" onClick={handleClose}>
+      <div className="flex shrink-0 flex-col-reverse gap-2 border-t bg-muted/20 px-4 py-4 sm:flex-row sm:justify-end sm:px-5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-9 w-full px-4 text-sm sm:w-auto"
+          onClick={handleClose}
+        >
           {t("dialog.cancel")}
         </Button>
-        <Button size="sm" className="text-sm h-9 px-4" onClick={handleSave}>
+        <Button size="sm" className="h-9 w-full px-4 text-sm sm:w-auto" onClick={handleSave}>
           {t("dialog.save")}
         </Button>
       </div>
