@@ -103,10 +103,7 @@ export function TerminalTab() {
         />
       </SettingRow>
 
-      <SettingRow
-        label={t("settings.showRemoteStats")}
-        desc={t("settings.showRemoteStatsDesc")}
-      >
+      <SettingRow label={t("settings.showRemoteStats")} desc={t("settings.showRemoteStatsDesc")}>
         <SettingSwitch
           checked={appSettings.ui.show_remote_stats ?? false}
           onChange={(v) => updateUi({ show_remote_stats: v })}
@@ -127,10 +124,7 @@ export function TerminalTab() {
 
       {/* ── Action Links ─────────────────────────────────────────────────── */}
       <div className="space-y-3 pt-2 border-t">
-        <SettingRow
-          label={t("settings.actionLinks")}
-          desc={t("settings.actionLinksDesc")}
-        >
+        <SettingRow label={t("settings.actionLinks")} desc={t("settings.actionLinksDesc")}>
           <SettingSwitch
             checked={actionLinksEnabled}
             onChange={(v) =>
@@ -170,7 +164,10 @@ export function TerminalTab() {
                 },
               ] as const
             ).map(({ key, label, example, desc }) => (
-              <div key={key} className="flex items-center gap-3 px-3 py-2 bg-muted/20">
+              <div
+                key={key}
+                className="flex flex-col gap-2 bg-muted/20 px-3 py-3 sm:flex-row sm:items-center"
+              >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{label}</span>
@@ -236,18 +233,15 @@ export function TerminalTab() {
 
         {/* ── Built-in rules (read-only preview) ── */}
         <div className="space-y-1">
-          <Label className="font-medium text-sm">{t("settings.keywordHighlightBuiltinRules")}</Label>
-          <p className="text-xs text-muted-foreground">{t("settings.keywordHighlightBuiltinNote")}</p>
-          <div className="border rounded-md overflow-hidden grid grid-cols-2">
-            {builtinRules.map((rule, idx) => (
-              <div
-                key={rule.id}
-                className={`flex items-center gap-2 px-3 py-1.5 border-b bg-muted/30 ${idx % 2 === 1 ? "border-l" : ""
-                  } ${idx >= builtinRules.length - (builtinRules.length % 2 === 0 ? 2 : 1)
-                    ? "border-b-0"
-                    : ""
-                  }`}
-              >
+          <Label className="font-medium text-sm">
+            {t("settings.keywordHighlightBuiltinRules")}
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.keywordHighlightBuiltinNote")}
+          </p>
+          <div className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2">
+            {builtinRules.map((rule) => (
+              <div key={rule.id} className="flex min-w-0 items-center gap-2 bg-muted/30 px-3 py-2">
                 <span
                   className={`w-3 h-3 rounded-full shrink-0 ring-1 ring-inset ${ringClass}`}
                   style={{ backgroundColor: rule.color }}
@@ -263,7 +257,9 @@ export function TerminalTab() {
         </div>
 
         {/* ── User rules ── */}
-        <div className={`space-y-1 transition-opacity ${appSettings.terminal.keyword_highlights_enabled ? "" : "opacity-50 pointer-events-none"}`}>
+        <div
+          className={`space-y-1 transition-opacity ${appSettings.terminal.keyword_highlights_enabled ? "" : "opacity-50 pointer-events-none"}`}
+        >
           <div className="flex items-center justify-between">
             <Label className="font-medium text-sm">{t("settings.keywordHighlightRules")}</Label>
             <Button variant="ghost" size="xs" className="text-primary" onClick={addRule}>
@@ -287,42 +283,51 @@ export function TerminalTab() {
                 <div key={rule.id} className="border-b last:border-0">
                   {/* Collapsed row */}
                   <div
-                    className="flex items-center gap-2 px-3 py-2 hover:bg-accent/50 transition-colors cursor-pointer select-none"
+                    className="cursor-pointer select-none px-3 py-2 transition-colors hover:bg-accent/50"
                     onClick={() => setExpandedId(isOpen ? null : rule.id)}
                   >
-                    <span
-                      className={`w-3 h-3 rounded-full shrink-0 ring-1 ring-inset ${ringClass}`}
-                      style={{ backgroundColor: isDark ? rule.color_dark : rule.color_light }}
-                    />
-                    <span className="flex-1 text-sm font-medium truncate">{rule.name}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {t("settings.keywordHighlightPatternCount", { count: patternCount })}
-                    </span>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <span
+                          className={`h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ${ringClass}`}
+                          style={{ backgroundColor: isDark ? rule.color_dark : rule.color_light }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {rule.name}
+                        </span>
+                      </div>
 
-                    <Switch
-                      checked={rule.enabled}
-                      onCheckedChange={(v) => patchRule(rule.id, { enabled: v })}
-                      onClick={(e) => e.stopPropagation()}
-                    />
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {t("settings.keywordHighlightPatternCount", { count: patternCount })}
+                        </span>
 
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive hover:bg-destructive/10 shrink-0"
-                      title={t("common.delete")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteRule(rule.id);
-                      }}
-                    >
-                      <MdDelete className="text-[1rem]" />
-                    </Button>
+                        <Switch
+                          checked={rule.enabled}
+                          onCheckedChange={(v) => patchRule(rule.id, { enabled: v })}
+                          onClick={(e) => e.stopPropagation()}
+                        />
 
-                    {isOpen ? (
-                      <MdExpandLess className="text-muted-foreground text-base shrink-0" />
-                    ) : (
-                      <MdExpandMore className="text-muted-foreground text-base shrink-0" />
-                    )}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-destructive hover:bg-destructive/10"
+                          title={t("common.delete")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteRule(rule.id);
+                          }}
+                        >
+                          <MdDelete className="text-[1rem]" />
+                        </Button>
+
+                        {isOpen ? (
+                          <MdExpandLess className="shrink-0 text-base text-muted-foreground" />
+                        ) : (
+                          <MdExpandMore className="shrink-0 text-base text-muted-foreground" />
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Expanded edit form */}
@@ -332,8 +337,8 @@ export function TerminalTab() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Rule name + dark/light colors on the same row */}
-                      <div className="flex items-end gap-4">
-                        <div className="flex-1 space-y-1 min-w-[8rem] max-w-[16rem]">
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
+                        <div className="min-w-0 flex-1 space-y-1 xl:max-w-[16rem]">
                           <Label className="text-xs text-muted-foreground">
                             {t("settings.keywordHighlightRuleName")}
                           </Label>
@@ -345,43 +350,57 @@ export function TerminalTab() {
                           />
                         </div>
 
-                        {(
-                          [
-                            { field: "color_dark" as const, labelKey: "keywordHighlightDarkPalette", swatchRing: "ring-white/20" },
-                            { field: "color_light" as const, labelKey: "keywordHighlightLightPalette", swatchRing: "ring-black/20" },
-                          ]
-                        ).map(({ field, labelKey, swatchRing }) => (
-                          <div key={field} className="shrink-0 space-y-1">
-                            <Label className="text-xs text-muted-foreground block">
-                              {t(`settings.${labelKey}`)}
-                            </Label>
-                            <div className="flex items-center gap-2">
-                              <div
-                                className={`relative w-8 h-8 rounded-md border shrink-0 overflow-hidden ring-1 ring-inset ${swatchRing}`}
-                                style={{ backgroundColor: rule[field] }}
-                              >
-                                <input
-                                  type="color"
-                                  className="absolute inset-[-10px] w-[200%] h-[200%] opacity-0 cursor-pointer"
-                                  value={rule[field] && rule[field].length === 7 ? rule[field] : "#000000"}
-                                  onChange={(e) => patchRule(rule.id, { [field]: e.target.value })}
+                        <div className="grid gap-3 sm:grid-cols-2 xl:flex">
+                          {[
+                            {
+                              field: "color_dark" as const,
+                              labelKey: "keywordHighlightDarkPalette",
+                              swatchRing: "ring-white/20",
+                            },
+                            {
+                              field: "color_light" as const,
+                              labelKey: "keywordHighlightLightPalette",
+                              swatchRing: "ring-black/20",
+                            },
+                          ].map(({ field, labelKey, swatchRing }) => (
+                            <div key={field} className="min-w-0 space-y-1">
+                              <Label className="block text-xs text-muted-foreground">
+                                {t(`settings.${labelKey}`)}
+                              </Label>
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className={`relative h-8 w-8 shrink-0 overflow-hidden rounded-md border ring-1 ring-inset ${swatchRing}`}
+                                  style={{ backgroundColor: rule[field] }}
+                                >
+                                  <input
+                                    type="color"
+                                    className="absolute inset-[-10px] h-[200%] w-[200%] cursor-pointer opacity-0"
+                                    value={
+                                      rule[field] && rule[field].length === 7
+                                        ? rule[field]
+                                        : "#000000"
+                                    }
+                                    onChange={(e) =>
+                                      patchRule(rule.id, { [field]: e.target.value })
+                                    }
+                                  />
+                                </div>
+                                <Input
+                                  className="h-8 w-full font-mono text-xs sm:w-[7.5rem]"
+                                  value={rule[field]}
+                                  maxLength={7}
+                                  placeholder="#rrggbb"
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (/^#[0-9a-fA-F]{0,6}$/.test(v)) {
+                                      patchRule(rule.id, { [field]: v });
+                                    }
+                                  }}
                                 />
                               </div>
-                              <Input
-                                className="text-xs h-8 font-mono w-[7.5rem]"
-                                value={rule[field]}
-                                maxLength={7}
-                                placeholder="#rrggbb"
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  if (/^#[0-9a-fA-F]{0,6}$/.test(v)) {
-                                    patchRule(rule.id, { [field]: v });
-                                  }
-                                }}
-                              />
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
 
                       {/* Patterns */}
