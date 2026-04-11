@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -9,9 +8,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+interface SerialPortOption {
+  unavailable?: boolean;
+  value: string;
+}
+
 interface SerialFormProps {
   serialPortName: string;
   setSerialPortName: (v: string) => void;
+  serialPortOptions: SerialPortOption[];
+  serialPortsLoading: boolean;
+  serialPortsError: string;
+  onSerialPortDropdownOpen: () => void;
   baudRate: string;
   setBaudRate: (v: string) => void;
   dataBits: string;
@@ -25,6 +33,10 @@ interface SerialFormProps {
 export function SerialForm({
   serialPortName,
   setSerialPortName,
+  serialPortOptions,
+  serialPortsLoading,
+  serialPortsError,
+  onSerialPortDropdownOpen,
   baudRate,
   setBaudRate,
   dataBits,
@@ -43,12 +55,52 @@ export function SerialForm({
           <Label className="text-[0.6875rem] text-muted-foreground">
             {t("dialog.serialPort", "Serial Port")}
           </Label>
-          <Input
-            className="mt-1 text-xs h-8"
-            placeholder={t("dialog.serialPortPlaceholder", "COM1 or /dev/ttyS0")}
-            value={serialPortName}
-            onChange={(e) => setSerialPortName(e.target.value)}
-          />
+          <Select
+            value={serialPortName || undefined}
+            onValueChange={setSerialPortName}
+            onOpenChange={(open) => {
+              if (open) {
+                onSerialPortDropdownOpen();
+              }
+            }}
+          >
+            <SelectTrigger className="mt-1 h-8 text-xs font-normal">
+              <SelectValue
+                placeholder={t("dialog.selectSerialPort", "Select Serial Port")}
+              />
+            </SelectTrigger>
+            <SelectContent
+              position="popper"
+              align="start"
+              side="bottom"
+              sideOffset={4}
+              className="w-[var(--radix-select-trigger-width)]"
+            >
+              {serialPortsLoading ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  {t("dialog.loadingSerialPorts", "Loading serial ports...")}
+                </div>
+              ) : serialPortOptions.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  {t("dialog.noSerialPortsFound", "No serial ports found")}
+                </div>
+              ) : (
+                serialPortOptions.map((port) => (
+                  <SelectItem key={port.value} value={port.value}>
+                    {port.unavailable
+                      ? t("dialog.serialPortUnavailable", {
+                          port: port.value,
+                          defaultValue: "{{port}} (Unavailable)",
+                        })
+                      : port.value}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          {serialPortsError && (
+            <p className="mt-1 text-[0.6875rem] text-destructive">{serialPortsError}</p>
+          )}
         </div>
         <div className="min-w-[9rem] flex-[1_1_9rem]">
           <Label className="text-[0.6875rem] text-muted-foreground">

@@ -57,7 +57,10 @@ export default function NewSessionPage() {
   const [otpEntries, setOtpEntries] = useState<OtpEntry[]>([]);
 
   // Serial Settings States
-  const [serialPortName, setSerialPortName] = useState("COM1");
+  const [serialPortName, setSerialPortName] = useState("");
+  const [serialPorts, setSerialPorts] = useState<string[]>([]);
+  const [serialPortsLoading, setSerialPortsLoading] = useState(false);
+  const [serialPortsError, setSerialPortsError] = useState("");
   const [baudRate, setBaudRate] = useState("115200");
   const [dataBits, setDataBits] = useState("8");
   const [parity, setParity] = useState("none");
@@ -143,6 +146,28 @@ export default function NewSessionPage() {
     }
   }, [editId]);
 
+  const loadSerialPorts = useCallback(async () => {
+    setSerialPortsLoading(true);
+    setSerialPortsError("");
+
+    try {
+      const ports = await invoke<string[]>("list_serial_ports");
+      setSerialPorts(ports);
+    } catch (e) {
+      setSerialPortsError(
+        `${t("dialog.serialPortsLoadFailed", "Failed to load serial ports")}: ${String(e)}`,
+      );
+    } finally {
+      setSerialPortsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (currentTab === "serial") {
+      void loadSerialPorts();
+    }
+  }, [currentTab, loadSerialPorts]);
+
   const resetForm = useCallback(() => {
     setName("");
     setGroupId("");
@@ -159,11 +184,31 @@ export default function NewSessionPage() {
     setProxyId("");
     setOtpId("");
     setAutoFillOtp(false);
+    setSerialPortName("");
+    setSerialPorts([]);
+    setSerialPortsLoading(false);
+    setSerialPortsError("");
+    setBaudRate("115200");
+    setDataBits("8");
+    setParity("none");
+    setStopBits("1");
     setShowIconPicker(false);
     setError("");
     setConnecting(false);
     setSaveSuccess(false);
   }, []);
+
+  const serialPortOptions: { unavailable?: boolean; value: string }[] = serialPorts.map(
+    (port) => ({
+      value: port,
+    }),
+  );
+  if (serialPortName && !serialPorts.includes(serialPortName)) {
+    serialPortOptions.unshift({
+      value: serialPortName,
+      unavailable: true,
+    });
+  }
 
   const handleClose = () => {
     if (connecting) return;
@@ -173,6 +218,10 @@ export default function NewSessionPage() {
   const handleSave = async () => {
     if ((currentTab === "ssh" || currentTab === "telnet") && !host) {
       setError(t("dialog.hostRequired"));
+      return;
+    }
+    if (currentTab === "serial" && !serialPortName) {
+      setError(t("dialog.serialPortRequired", "Serial port is required"));
       return;
     }
 
@@ -529,6 +578,12 @@ export default function NewSessionPage() {
             <SerialForm
               serialPortName={serialPortName}
               setSerialPortName={setSerialPortName}
+              serialPortOptions={serialPortOptions}
+              serialPortsLoading={serialPortsLoading}
+              serialPortsError={serialPortsError}
+              onSerialPortDropdownOpen={() => {
+                void loadSerialPorts();
+              }}
               baudRate={baudRate}
               setBaudRate={setBaudRate}
               dataBits={dataBits}
@@ -583,7 +638,11 @@ export default function NewSessionPage() {
           size="sm"
           className="w-full text-xs sm:w-auto"
           onClick={handleSave}
-          disabled={connecting || ((currentTab === "ssh" || currentTab === "telnet") && !host)}
+          disabled={
+            connecting ||
+            ((currentTab === "ssh" || currentTab === "telnet") && !host) ||
+            (currentTab === "serial" && !serialPortName)
+          }
         >
           {connecting ? t("dialog.saving") : t("dialog.save")}
         </Button>
