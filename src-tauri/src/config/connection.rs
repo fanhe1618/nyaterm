@@ -1,66 +1,123 @@
 use super::{
-    get_config_dir, load_app_settings, load_json, load_proxies, save_app_settings, save_json,
-    save_proxies, uuid_v4, ProxyConfig, ProxySettings,
+    get_config_dir, load_app_settings, load_proxies, save_app_settings, save_json, save_proxies,
+    uuid_v4, ProxyConfig, ProxySettings,
 };
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ConnectionNetworkSettings {
-    #[serde(default)]
-    pub proxy: Option<ProxySettings>,
+// ── Connection type discriminator ───────────────────────────────────────────
+
+/// Type-specific configuration for each connection kind.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConnectionType {
+    Ssh {
+        host: String,
+        #[serde(default = "default_ssh_port")]
+        port: u16,
+        #[serde(default = "default_ssh_user")]
+        username: String,
+    },
+    LocalTerminal {
+        #[serde(default)]
+        shell_path: String,
+        #[serde(default)]
+        working_dir: Option<String>,
+    },
+    Telnet {
+        host: String,
+        #[serde(default = "default_telnet_port")]
+        port: u16,
+    },
+    Serial {
+        port_name: String,
+        #[serde(default = "default_baud_rate")]
+        baud_rate: u32,
+        #[serde(default = "default_data_bits")]
+        data_bits: u8,
+        #[serde(default = "default_parity")]
+        parity: String,
+        #[serde(default = "default_stop_bits")]
+        stop_bits: String,
+    },
 }
 
-/// Saved SSH connection. Password-based auth references a managed password via `password_id`.
-/// Key-based auth references a managed key via `key_id`.
+fn default_ssh_port() -> u16 {
+    22
+}
+fn default_ssh_user() -> String {
+    "root".to_string()
+}
+fn default_telnet_port() -> u16 {
+    23
+}
+fn default_baud_rate() -> u32 {
+    115_200
+}
+fn default_data_bits() -> u8 {
+    8
+}
+fn default_parity() -> String {
+    "none".to_string()
+}
+fn default_stop_bits() -> String {
+    "1".to_string()
+}
+
+// ── Auth block ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConnectionAuth {
+    #[serde(default = "default_auth_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub password_id: Option<String>,
+    #[serde(default)]
+    pub key_id: Option<String>,
+    #[serde(default)]
+    pub otp_id: Option<String>,
+    #[serde(default)]
+    pub auto_fill_otp: bool,
+}
+
+fn default_auth_mode() -> String {
+    "password".to_string()
+}
+
+// ── Network block ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConnectionNetwork {
+    #[serde(default)]
+    pub proxy_id: Option<String>,
+}
+
+// ── Saved connection ────────────────────────────────────────────────────────
+
+/// Unified saved connection: common fields + type-discriminated config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedConnection {
     #[serde(default = "uuid_v4")]
     pub id: String,
     pub name: String,
+
+    #[serde(flatten)]
+    pub config: ConnectionType,
+
     #[serde(default)]
     pub group_id: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    pub auth_type: String,
-
-    /// Legacy field kept for deserialization during migration only.
-    #[serde(default, skip_serializing)]
-    pub password: Option<String>,
-
-    /// References a managed password in passwords.json.
-    #[serde(default)]
-    pub password_id: Option<String>,
-
-    /// References a managed key in keys.json.
-    #[serde(default)]
-    pub key_id: Option<String>,
-
     #[serde(default)]
     pub sort_order: i32,
-
-    /// Icon key referencing a named icon (e.g. "docker", "ubuntu"). Displayed in the connections list.
     #[serde(default)]
     pub icon: Option<String>,
 
-    /// References a standalone proxy config by id.
     #[serde(default)]
-    pub proxy_id: Option<String>,
-
-    /// References an OTP entry for two-factor authentication.
+    pub auth: Option<ConnectionAuth>,
     #[serde(default)]
-    pub otp_id: Option<String>,
-
-    /// When true, auto-fill the OTP code during keyboard-interactive auth.
-    #[serde(default)]
-    pub auto_fill_otp: bool,
-
-    #[serde(default)]
-    pub network: ConnectionNetworkSettings,
+    pub network: Option<ConnectionNetwork>,
 }
 
 /// Group for organizing saved connections in the UI.
@@ -81,17 +138,54 @@ pub struct Group {
 pub struct SessionsConfig {
     #[serde(default)]
     pub groups: Vec<Group>,
+    #[serde(default)]
     pub connections: Vec<SavedConnection>,
 }
 
 /// Alias for the main app config (sessions + groups).
 pub type AppConfig = SessionsConfig;
 
+// ── Loading / saving ────────────────────────────────────────────────────────
+
 pub fn load_sessions(app: &AppHandle) -> AppResult<SessionsConfig> {
     let dir = get_config_dir(app)?;
     let path = dir.join("sessions.json");
-    let cfg: SessionsConfig = load_json(&path)?;
-    Ok(cfg)
+
+    if !path.exists() {
+        return Ok(SessionsConfig::default());
+    }
+
+    let content = std::fs::read_to_string(&path)?;
+    let raw: serde_json::Value = serde_json::from_str(&content)?;
+
+    let groups: Vec<Group> = raw
+        .get("groups")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let raw_connections = raw
+        .get("connections")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut connections = Vec::new();
+    for raw_conn in raw_connections {
+        if raw_conn.get("type").is_none() {
+            tracing::warn!("Skipping unsupported legacy connection entry without type");
+            continue;
+        }
+
+        match serde_json::from_value::<SavedConnection>(raw_conn) {
+            Ok(conn) => connections.push(conn),
+            Err(e) => tracing::warn!("Skipping malformed connection: {e}"),
+        }
+    }
+
+    Ok(SessionsConfig {
+        groups,
+        connections,
+    })
 }
 
 /// Saves sessions config to disk.
@@ -101,18 +195,9 @@ pub fn save_sessions(app: &AppHandle, config: &SessionsConfig) -> AppResult<()> 
 }
 
 /// Loads the main app config (sessions + groups).
-/// Also runs one-time migration from inline `password` to `password_id`.
+/// Also runs one-time migrations.
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let mut cfg = load_sessions(app)?;
-
-    let needs_migration = cfg
-        .connections
-        .iter()
-        .any(|c| c.password.is_some() && c.password_id.is_none());
-
-    if needs_migration {
-        migrate_passwords_to_store(app, &mut cfg)?;
-    }
 
     migrate_global_proxy_to_connections(app, &mut cfg)?;
     migrate_connection_proxies_to_standalone(app, &mut cfg)?;
@@ -120,39 +205,7 @@ pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     Ok(cfg)
 }
 
-/// Migrates connections that still have an inline `password` field to use the password store.
-/// Creates a password entry for each, sets `password_id`, and clears the legacy field.
-fn migrate_passwords_to_store(app: &AppHandle, cfg: &mut SessionsConfig) -> AppResult<()> {
-    use super::password::{load_passwords, save_passwords, SavedPassword};
-
-    let mut pw_cfg = load_passwords(app)?;
-
-    for conn in &mut cfg.connections {
-        if let Some(encrypted_pw) = conn.password.take() {
-            if conn.password_id.is_some() {
-                continue;
-            }
-            let pw_id = uuid::Uuid::new_v4().to_string();
-            let entry = SavedPassword {
-                id: pw_id.clone(),
-                name: conn.name.clone(),
-                password: Some(encrypted_pw),
-                has_password: false,
-            };
-            pw_cfg.passwords.push(entry);
-
-            // Re-encrypt isn't needed — the password is already AES-GCM encrypted.
-            // We just move the ciphertext blob into the password store.
-            conn.password_id = Some(pw_id);
-        }
-    }
-
-    save_passwords(app, &pw_cfg)?;
-    save_sessions(app, cfg)?;
-
-    tracing::info!("Migrated inline passwords to password store");
-    Ok(())
-}
+// ── Config migrations ───────────────────────────────────────────────────────
 
 fn migrate_global_proxy_to_connections(app: &AppHandle, cfg: &mut SessionsConfig) -> AppResult<()> {
     let mut settings = load_app_settings(app)?;
@@ -163,14 +216,29 @@ fn migrate_global_proxy_to_connections(app: &AppHandle, cfg: &mut SessionsConfig
     let legacy_proxy = settings.proxy.clone();
     let mut migrated = false;
 
+    let mut proxies = load_proxies(app).unwrap_or_default();
+    let proxy_id = uuid::Uuid::new_v4().to_string();
+    proxies.push(ProxyConfig {
+        id: proxy_id.clone(),
+        name: "Migrated Global Proxy".to_string(),
+        protocol: legacy_proxy.protocol,
+        host: legacy_proxy.host,
+        port: legacy_proxy.port,
+        username: None,
+        password: None,
+    });
+
     for conn in &mut cfg.connections {
-        if conn.network.proxy.is_none() {
-            conn.network.proxy = Some(legacy_proxy.clone());
+        let has_proxy = conn.network.as_ref().is_some_and(|n| n.proxy_id.is_some());
+        if !has_proxy {
+            let net = conn.network.get_or_insert_with(ConnectionNetwork::default);
+            net.proxy_id = Some(proxy_id.clone());
             migrated = true;
         }
     }
 
     if migrated {
+        save_proxies(app, &proxies)?;
         save_sessions(app, cfg)?;
     }
 
@@ -182,36 +250,11 @@ fn migrate_global_proxy_to_connections(app: &AppHandle, cfg: &mut SessionsConfig
 }
 
 fn migrate_connection_proxies_to_standalone(
-    app: &AppHandle,
-    cfg: &mut SessionsConfig,
+    _app: &AppHandle,
+    _cfg: &mut SessionsConfig,
 ) -> AppResult<()> {
-    let needs_migration = cfg.connections.iter().any(|c| c.network.proxy.is_some());
-    if !needs_migration {
-        return Ok(());
-    }
-
-    let mut proxies = load_proxies(app).unwrap_or_default();
-
-    for conn in &mut cfg.connections {
-        if let Some(proxy) = conn.network.proxy.take() {
-            let proxy_id = uuid::Uuid::new_v4().to_string();
-            proxies.push(ProxyConfig {
-                id: proxy_id.clone(),
-                name: format!("{}", conn.name),
-                protocol: proxy.protocol,
-                host: proxy.host,
-                port: proxy.port,
-                username: None,
-                password: None,
-            });
-            conn.proxy_id = Some(proxy_id);
-        }
-    }
-
-    save_proxies(app, &proxies)?;
-    save_sessions(app, cfg)?;
-
-    tracing::info!("Migrated per-connection proxy settings to standalone proxy configs");
+    // Legacy `network.proxy` inline objects are no longer present in the new format.
+    // The old migration already ran before this format change, so nothing to do.
     Ok(())
 }
 

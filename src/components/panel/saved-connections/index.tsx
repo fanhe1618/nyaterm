@@ -99,8 +99,8 @@ export default function SavedConnections({
       ? savedConnections.filter(
           (c) =>
             c.name.toLowerCase().includes(keyword) ||
-            c.host.toLowerCase().includes(keyword) ||
-            c.username.toLowerCase().includes(keyword),
+            (c.host ?? "").toLowerCase().includes(keyword) ||
+            (c.username ?? "").toLowerCase().includes(keyword),
         )
       : savedConnections;
 

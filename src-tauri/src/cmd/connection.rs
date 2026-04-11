@@ -23,8 +23,12 @@ pub fn save_connection(
     let existing = cfg.connections.iter().find(|c| c.id == target_id);
 
     // Preserve existing password_id if not provided
-    if connection.password_id.is_none() {
-        connection.password_id = existing.and_then(|e| e.password_id.clone());
+    if let Some(ref mut auth) = connection.auth {
+        if auth.password_id.is_none() {
+            auth.password_id = existing
+                .and_then(|e| e.auth.as_ref())
+                .and_then(|a| a.password_id.clone());
+        }
     }
 
     if let Some(ex) = cfg.connections.iter_mut().find(|c| c.id == target_id) {

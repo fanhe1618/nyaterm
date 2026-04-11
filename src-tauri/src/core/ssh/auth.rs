@@ -54,9 +54,27 @@ pub(crate) fn load_saved_ssh_config(app: &AppHandle, connection_id: &str) -> App
     let conn = crate::config::load_connection_by_id(app, connection_id)?;
     let proxy = resolve_proxy(app, &conn)?;
 
-    let auth = match conn.auth_type.as_str() {
+    let (host, port, username) = match &conn.config {
+        crate::config::ConnectionType::Ssh {
+            host,
+            port,
+            username,
+        } => (host.clone(), *port, username.clone()),
+        _ => {
+            return Err(AppError::Auth(
+                "Connection is not an SSH connection".to_string(),
+            ))
+        }
+    };
+
+    let conn_auth = conn
+        .auth
+        .as_ref()
+        .ok_or_else(|| AppError::Auth("No auth config for SSH connection".to_string()))?;
+
+    let auth = match conn_auth.mode.as_str() {
         "password" => {
-            let pw_id = conn
+            let pw_id = conn_auth
                 .password_id
                 .as_deref()
                 .ok_or_else(|| AppError::Auth("No password for this connection".to_string()))?;
@@ -67,7 +85,7 @@ pub(crate) fn load_saved_ssh_config(app: &AppHandle, connection_id: &str) -> App
             SshAuth::Password { password }
         }
         "key" => {
-            let key_id = conn
+            let key_id = conn_auth
                 .key_id
                 .as_deref()
                 .ok_or_else(|| AppError::Auth("No SSH key for this connection".to_string()))?;
@@ -84,9 +102,9 @@ pub(crate) fn load_saved_ssh_config(app: &AppHandle, connection_id: &str) -> App
 
     Ok(SshConfig {
         name: conn.name,
-        host: conn.host,
-        port: conn.port,
-        username: conn.username,
+        host,
+        port,
+        username,
         auth,
         proxy,
     })
@@ -96,7 +114,9 @@ fn resolve_proxy(
     app: &AppHandle,
     conn: &crate::config::SavedConnection,
 ) -> AppResult<Option<crate::config::ProxySettings>> {
-    let Some(proxy_id) = &conn.proxy_id else {
+    let proxy_id = conn.network.as_ref().and_then(|n| n.proxy_id.as_deref());
+
+    let Some(proxy_id) = proxy_id else {
         return Ok(None);
     };
 
@@ -197,10 +217,11 @@ struct OtpAutoFillInfo {
 
 fn resolve_otp_info(app: &AppHandle, connection_id: &str) -> Option<OtpAutoFillInfo> {
     let conn = crate::config::load_connection_by_id(app, connection_id).ok()?;
-    let otp_id = conn.otp_id?;
+    let auth = conn.auth.as_ref()?;
+    let otp_id = auth.otp_id.clone()?;
     Some(OtpAutoFillInfo {
         otp_id,
-        auto_fill: conn.auto_fill_otp,
+        auto_fill: auth.auto_fill_otp,
     })
 }
 
@@ -244,8 +265,7 @@ async fn finish_keyboard_interactive(
                     Vec::new()
                 } else if let Some(info) = otp_info.filter(|i| i.auto_fill) {
                     tracing::info!("Auto-filling OTP for keyboard-interactive auth");
-                    let result =
-                        crate::cmd::otp::generate_otp_for_entry(app, &info.otp_id)?;
+                    let result = crate::cmd::otp::generate_otp_for_entry(app, &info.otp_id)?;
                     prompts.iter().map(|_| result.code.clone()).collect()
                 } else {
                     let request_id = uuid::Uuid::new_v4().to_string();

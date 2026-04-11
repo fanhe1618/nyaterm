@@ -1,6 +1,6 @@
 //! Import sessions from Xshell (.xts), MobaXterm (.mxtsessions), and WindTerm (.sessions) files.
 
-use crate::config::{self, Group, SavedConnection};
+use crate::config::{self, ConnectionAuth, ConnectionType, Group, SavedConnection};
 use crate::error::{AppError, AppResult};
 use std::collections::HashMap;
 use std::io::Read;
@@ -415,21 +415,23 @@ pub fn import_sessions(app: tauri::AppHandle, file_path: String) -> AppResult<us
         cfg.connections.push(SavedConnection {
             id: uuid::Uuid::new_v4().to_string(),
             name: sess.name,
+            config: ConnectionType::Ssh {
+                host: sess.host,
+                port: sess.port,
+                username: sess.username,
+            },
             group_id,
             description: None,
-            host: sess.host,
-            port: sess.port,
-            username: sess.username,
-            auth_type: sess.auth_type,
-            password: None,
-            password_id: None,
-            key_id: None,
             sort_order: 0,
             icon: None,
-            proxy_id: None,
-            otp_id: None,
-            auto_fill_otp: false,
-            network: Default::default(),
+            auth: Some(ConnectionAuth {
+                mode: sess.auth_type,
+                password_id: None,
+                key_id: None,
+                otp_id: None,
+                auto_fill_otp: false,
+            }),
+            network: None,
         });
     }
 

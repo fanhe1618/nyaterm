@@ -1,6 +1,9 @@
 /** Type of terminal session: SSH remote or local shell. */
 export type SessionType = "SSH" | "Local";
 
+/** Connection type discriminator matching Rust ConnectionType. */
+export type ConnectionTypeTag = "ssh" | "local_terminal" | "telnet" | "serial";
+
 /** Metadata for a connected or disconnected session. */
 export interface SessionInfo {
   id: string;
@@ -66,30 +69,45 @@ export interface SavedPassword {
   password?: string;
 }
 
-/** Stored SSH connection with host, auth, and optional group. */
+/** Auth block for SSH connections. */
+export interface ConnectionAuth {
+  mode: string;
+  password_id?: string;
+  key_id?: string;
+  otp_id?: string;
+  auto_fill_otp?: boolean;
+}
+
+/** Network block for connections. */
+export interface ConnectionNetwork {
+  proxy_id?: string;
+}
+
+/** Unified saved connection with type-discriminated config. */
 export interface SavedConnection {
   id: string;
   name: string;
+  /** Connection type discriminator. */
+  type: ConnectionTypeTag;
   group_id?: string;
   description?: string;
-  host: string;
-  port: number;
-  username: string;
-  auth_type: string;
-  /** References a managed password by id. */
-  password_id?: string;
-  /** References a managed SSH key by id. */
-  key_id?: string;
   sort_order?: number;
-  /** Icon key referencing a named icon from QUICK_ICONS (e.g. "docker", "ubuntu"). */
   icon?: string;
-  /** References a standalone proxy config by id. */
-  proxy_id?: string;
-  /** References an OTP entry for two-factor authentication. */
-  otp_id?: string;
-  /** When true, auto-fill the OTP code during keyboard-interactive auth. */
-  auto_fill_otp?: boolean;
-  network?: ConnectionNetworkSettings;
+  auth?: ConnectionAuth;
+  network?: ConnectionNetwork;
+  /** SSH-specific fields (present when type === "ssh"). */
+  host?: string;
+  port?: number;
+  username?: string;
+  /** Local terminal fields (present when type === "local_terminal"). */
+  shell_path?: string;
+  working_dir?: string;
+  /** Serial fields (present when type === "serial"). */
+  port_name?: string;
+  baud_rate?: number;
+  data_bits?: number;
+  parity?: string;
+  stop_bits?: string;
 }
 
 /** Stored OTP entry for two-factor authentication. */
@@ -283,10 +301,6 @@ export interface ProxyConfig {
   username?: string;
   password?: string;
   password_id?: string;
-}
-
-export interface ConnectionNetworkSettings {
-  proxy?: ProxySettings;
 }
 
 export interface SearchEngine {

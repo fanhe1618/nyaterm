@@ -30,7 +30,8 @@ export default function NewSessionPage() {
   const [newGroupNamePending, setNewGroupNamePending] = useState("");
   const [description, setDescription] = useState("");
   const [host, setHost] = useState("");
-  const [port, setPort] = useState(22);
+  const [sshPort, setSshPort] = useState(22);
+  const [telnetPort, setTelnetPort] = useState(23);
   const [username, setUsername] = useState("root");
   const [authType, setAuthType] = useState<"password" | "key">("password");
   const [passwordId, setPasswordId] = useState("");
@@ -103,16 +104,39 @@ export default function NewSessionPage() {
             setName(found.name);
             setGroupId(found.group_id || "");
             setDescription(found.description || "");
-            setHost(found.host);
-            setPort(found.port);
-            setUsername(found.username);
-            setAuthType(found.auth_type as "password" | "key");
-            setPasswordId(found.password_id || "");
-            setKeyId(found.key_id || "");
             setIconKey(found.icon || "");
-            setProxyId(found.proxy_id || "");
-            setOtpId(found.otp_id || "");
-            setAutoFillOtp(found.auto_fill_otp || false);
+
+            const tabMap: Record<string, string> = {
+              ssh: "ssh",
+              local_terminal: "local",
+              telnet: "telnet",
+              serial: "serial",
+            };
+            setCurrentTab(tabMap[found.type] || "ssh");
+
+            if (found.type === "ssh") {
+              setHost(found.host || "");
+              setSshPort(found.port || 22);
+              setUsername(found.username || "root");
+              setAuthType((found.auth?.mode as "password" | "key") || "password");
+              setPasswordId(found.auth?.password_id || "");
+              setKeyId(found.auth?.key_id || "");
+              setProxyId(found.network?.proxy_id || "");
+              setOtpId(found.auth?.otp_id || "");
+              setAutoFillOtp(found.auth?.auto_fill_otp || false);
+            } else if (found.type === "telnet") {
+              setHost(found.host || "");
+              setTelnetPort(found.port || 23);
+            } else if (found.type === "local_terminal") {
+              setShellPath(found.shell_path || "powershell.exe");
+              setWorkingDir(found.working_dir || "");
+            } else if (found.type === "serial") {
+              setSerialPortName(found.port_name || "");
+              setBaudRate(String(found.baud_rate || 115200));
+              setDataBits(String(found.data_bits || 8));
+              setParity(found.parity || "none");
+              setStopBits(found.stop_bits || "1");
+            }
           }
         })
         .catch(() => {});
@@ -125,7 +149,8 @@ export default function NewSessionPage() {
     setNewGroupNamePending("");
     setDescription("");
     setHost("");
-    setPort(22);
+    setSshPort(22);
+    setTelnetPort(23);
     setUsername("root");
     setAuthType("password");
     setPasswordId("");
@@ -168,28 +193,59 @@ export default function NewSessionPage() {
         });
       }
 
+      const defaultName =
+        currentTab === "local"
+          ? t("dialog.localTerminal")
+          : currentTab === "serial"
+            ? serialPortName
+            : currentTab === "telnet"
+              ? `${host}:${telnetPort}`
+              : `${host}:${sshPort}`;
+
+      const typeTag =
+        currentTab === "ssh"
+          ? "ssh"
+          : currentTab === "local"
+            ? "local_terminal"
+            : currentTab === "telnet"
+              ? "telnet"
+              : "serial";
+
       const connection: SavedConnection = {
         id: initialData?.id || "",
-        name:
-          name ||
-          (currentTab === "local"
-            ? t("dialog.localTerminal")
-            : currentTab === "serial"
-              ? serialPortName
-              : `${host}:${port}`),
+        name: name || defaultName,
+        type: typeTag as SavedConnection["type"],
         group_id: finalGroupId || undefined,
         description: description || undefined,
-        host,
-        port,
-        username,
-        auth_type: authType,
-        password_id: authType === "password" && passwordId ? passwordId : undefined,
-        key_id: authType === "key" && keyId ? keyId : undefined,
         icon: iconKey || undefined,
-        proxy_id: proxyId || undefined,
-        otp_id: otpId || undefined,
-        auto_fill_otp: otpId ? autoFillOtp : undefined,
-        network: initialData?.network ?? {},
+        ...(currentTab === "ssh"
+          ? {
+              host,
+              port: sshPort,
+              username,
+              auth: {
+                mode: authType,
+                password_id: authType === "password" && passwordId ? passwordId : undefined,
+                key_id: authType === "key" && keyId ? keyId : undefined,
+                otp_id: otpId || undefined,
+                auto_fill_otp: otpId ? autoFillOtp : undefined,
+              },
+              network: proxyId ? { proxy_id: proxyId } : initialData?.network,
+            }
+          : {}),
+        ...(currentTab === "telnet" ? { host, port: telnetPort } : {}),
+        ...(currentTab === "local"
+          ? { shell_path: shellPath, working_dir: workingDir || undefined }
+          : {}),
+        ...(currentTab === "serial"
+          ? {
+              port_name: serialPortName,
+              baud_rate: Number(baudRate),
+              data_bits: Number(dataBits),
+              parity,
+              stop_bits: stopBits,
+            }
+          : {}),
       };
 
       const savedId = await invoke<string>("save_connection", { connection });
@@ -430,8 +486,8 @@ export default function NewSessionPage() {
             <SshForm
               host={host}
               setHost={setHost}
-              port={port}
-              setPort={setPort}
+              port={sshPort}
+              setPort={setSshPort}
               username={username}
               setUsername={setUsername}
               authType={authType}
@@ -461,7 +517,12 @@ export default function NewSessionPage() {
           </TabsContent>
 
           <TabsContent value="telnet" className="space-y-4 m-0 border-0 outline-none w-full">
-            <TelnetForm host={host} setHost={setHost} port={port} setPort={setPort} />
+            <TelnetForm
+              host={host}
+              setHost={setHost}
+              port={telnetPort}
+              setPort={setTelnetPort}
+            />
           </TabsContent>
 
           <TabsContent value="serial" className="space-y-4 m-0 border-0 outline-none w-full">
