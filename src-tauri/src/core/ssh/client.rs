@@ -125,6 +125,8 @@ pub(super) fn build_client_config(app: &AppHandle) -> client::Config {
         window_size: 32 * 1024 * 1024,
         maximum_packet_size: 32 * 1024,
         nodelay: true,
+        inactivity_timeout: None,
+        keepalive_max: 3,
         ..Default::default()
     };
 

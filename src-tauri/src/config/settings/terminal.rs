@@ -68,7 +68,7 @@ fn default_scrollback() -> u32 {
     10000
 }
 fn default_keep_alive() -> u32 {
-    60
+    3
 }
 
 impl Default for TerminalSettings {
