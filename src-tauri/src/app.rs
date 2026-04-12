@@ -59,6 +59,15 @@ pub fn setup(
 
     session_manager.set_app_handle(app.handle().clone());
 
+    // Restore the master password for wrapping-key derivation.
+    if let Ok(settings) = crate::config::load_app_settings(app.handle()) {
+        if let Some(ref ct) = settings.security.master_password {
+            if let Ok(plain) = crate::utils::crypto::decrypt_settings_secret(ct) {
+                crate::utils::crypto::set_master_password(Some(plain));
+            }
+        }
+    }
+
     let config_dir = home_dir.join(".dragonfly");
     let mgr = session_manager.clone();
     tauri::async_runtime::spawn(async move {
