@@ -12,6 +12,7 @@ import {
 } from "react-icons/md";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
 import type { RemoteStats } from "@/types/global";
@@ -167,7 +168,7 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
   const { appSettings } = useApp();
   const [stats, setStats] = useState<RemoteStats | null>(null);
   const [error, setError] = useState(false);
-  const [isFetching, setIsFetching] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchingRef = useRef(false);
   const failCountRef = useRef(0);
@@ -175,10 +176,10 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
   const enabled = appSettings.ui.show_remote_stats ?? false;
   const pollIntervalMs = Math.max(1, appSettings.ui.remote_stats_interval ?? 3) * 1000;
 
-  const fetchStats = useCallback(async (sessionId: string) => {
+  const fetchStats = useCallback(async (sessionId: string, manual = false) => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
-    setIsFetching(true);
+    if (manual) setIsManualRefreshing(true);
 
     try {
       const data = await invoke<RemoteStats>("get_remote_stats", { sessionId });
@@ -193,13 +194,13 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
       }
     } finally {
       fetchingRef.current = false;
-      setIsFetching(false);
+      if (manual) setIsManualRefreshing(false);
     }
   }, []);
 
   const handleRefresh = useCallback(() => {
     if (!enabled || !activeSessionId) return;
-    void fetchStats(activeSessionId);
+    void fetchStats(activeSessionId, true);
   }, [activeSessionId, enabled, fetchStats]);
 
   useEffect(() => {
@@ -231,17 +232,21 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
       <PanelHeader
         title={t("panel.resourceMonitor")}
         actions={
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40"
-            onClick={handleRefresh}
-            disabled={!enabled || !activeSessionId || isFetching}
-            aria-label={t("resourceMonitor.refresh")}
-            title={t("resourceMonitor.refresh")}
-          >
-            <MdRefresh className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40"
+                onClick={handleRefresh}
+                disabled={!enabled || !activeSessionId || isManualRefreshing}
+                aria-label={t("resourceMonitor.refresh")}
+              >
+                <MdRefresh className={`h-4 w-4 ${isManualRefreshing ? "animate-spin" : ""}`} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t("resourceMonitor.refresh")}</TooltipContent>
+          </Tooltip>
         }
       />
 
