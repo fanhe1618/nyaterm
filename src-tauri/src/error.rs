@@ -34,6 +34,9 @@ pub enum AppError {
     #[error("{0}")]
     Channel(String),
 
+    #[error("{0}")]
+    Cancelled(String),
+
     #[error("SFTP error: {0}")]
     Sftp(#[from] russh_sftp::client::error::Error),
 

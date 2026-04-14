@@ -9,11 +9,19 @@ use crate::error::{AppError, AppResult};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags};
 use serde::Serialize;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
+use tokio::sync::Notify;
 
 const SFTP_FILE_TYPE_MASK: u32 = 0o170000;
 const POSIX_MODE_MASK: u32 = 0o7777;
+const TRANSFER_CANCELLED_MESSAGE: &str = "Transfer cancelled";
+
+lazy_static::lazy_static! {
+    static ref ACTIVE_TRANSFERS: Arc<Mutex<HashMap<String, Arc<TransferController>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+}
 
 /// Event payload emitted to the frontend to track file transfer lifecycle.
 #[derive(Debug, Clone, Serialize)]
@@ -22,9 +30,10 @@ pub struct TransferEvent {
     pub session_id: String,
     pub file_name: String,
     pub remote_path: String,
+    pub local_path: String,
     /// "upload" or "download"
     pub direction: String,
-    /// "started", "progress", "completed", or "error"
+    /// "started", "progress", "paused", "resumed", "completed", "cancelled", or "error"
     pub status: String,
     pub size: u64,
     pub bytes_transferred: u64,
@@ -56,6 +65,198 @@ pub struct FileProperties {
     pub gid: String,
     pub mtime: u64,
     pub atime: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransferControlState {
+    Running,
+    Paused,
+    Cancelled,
+}
+
+#[derive(Debug)]
+struct TransferRuntime {
+    id: String,
+    session_id: String,
+    file_name: String,
+    remote_path: String,
+    local_path: String,
+    direction: String,
+    bytes_transferred: u64,
+    total_size: u64,
+    control_state: TransferControlState,
+}
+
+#[derive(Debug)]
+struct TransferController {
+    runtime: Mutex<TransferRuntime>,
+    notify: Notify,
+}
+
+impl TransferController {
+    fn new(
+        id: String,
+        session_id: String,
+        file_name: String,
+        remote_path: String,
+        local_path: String,
+        direction: String,
+    ) -> Self {
+        Self {
+            runtime: Mutex::new(TransferRuntime {
+                id,
+                session_id,
+                file_name,
+                remote_path,
+                local_path,
+                direction,
+                bytes_transferred: 0,
+                total_size: 0,
+                control_state: TransferControlState::Running,
+            }),
+            notify: Notify::new(),
+        }
+    }
+
+    fn id(&self) -> String {
+        self.runtime.lock().unwrap().id.clone()
+    }
+
+    fn update_progress(&self, bytes_transferred: u64, total_size: u64) {
+        let mut runtime = self.runtime.lock().unwrap();
+        runtime.bytes_transferred = bytes_transferred;
+        runtime.total_size = total_size;
+    }
+
+    fn build_event(&self, status: &str, size: u64, error_msg: Option<String>) -> TransferEvent {
+        let runtime = self.runtime.lock().unwrap();
+        TransferEvent {
+            id: runtime.id.clone(),
+            session_id: runtime.session_id.clone(),
+            file_name: runtime.file_name.clone(),
+            remote_path: runtime.remote_path.clone(),
+            local_path: runtime.local_path.clone(),
+            direction: runtime.direction.clone(),
+            status: status.to_string(),
+            size,
+            bytes_transferred: runtime.bytes_transferred,
+            total_size: runtime.total_size,
+            error_msg,
+        }
+    }
+
+    fn pause(&self) -> Option<TransferEvent> {
+        {
+            let mut runtime = self.runtime.lock().unwrap();
+            if runtime.control_state != TransferControlState::Running {
+                return None;
+            }
+            runtime.control_state = TransferControlState::Paused;
+        }
+        Some(self.build_event("paused", 0, None))
+    }
+
+    fn resume(&self) -> Option<TransferEvent> {
+        {
+            let mut runtime = self.runtime.lock().unwrap();
+            if runtime.control_state != TransferControlState::Paused {
+                return None;
+            }
+            runtime.control_state = TransferControlState::Running;
+        }
+        self.notify.notify_waiters();
+        Some(self.build_event("resumed", 0, None))
+    }
+
+    fn cancel(&self) -> Option<TransferEvent> {
+        {
+            let mut runtime = self.runtime.lock().unwrap();
+            if runtime.control_state == TransferControlState::Cancelled {
+                return None;
+            }
+            runtime.control_state = TransferControlState::Cancelled;
+        }
+        self.notify.notify_waiters();
+        Some(self.build_event("cancelled", 0, None))
+    }
+
+    fn control_state(&self) -> TransferControlState {
+        self.runtime.lock().unwrap().control_state
+    }
+}
+
+fn register_transfer(controller: Arc<TransferController>) {
+    ACTIVE_TRANSFERS
+        .lock()
+        .unwrap()
+        .insert(controller.id(), controller);
+}
+
+fn unregister_transfer(id: &str) {
+    ACTIVE_TRANSFERS.lock().unwrap().remove(id);
+}
+
+fn find_transfer(id: &str) -> Option<Arc<TransferController>> {
+    ACTIVE_TRANSFERS.lock().unwrap().get(id).cloned()
+}
+
+async fn wait_for_transfer_ready(controller: &Arc<TransferController>) -> AppResult<()> {
+    loop {
+        let notified = controller.notify.notified();
+        match controller.control_state() {
+            TransferControlState::Running => return Ok(()),
+            TransferControlState::Cancelled => {
+                return Err(AppError::Cancelled(TRANSFER_CANCELLED_MESSAGE.to_string()))
+            }
+            TransferControlState::Paused => notified.await,
+        }
+    }
+}
+
+async fn cleanup_cancelled_download(local_path: &str) {
+    if tokio::fs::remove_file(local_path).await.is_err() {
+        let _ = tokio::fs::remove_dir_all(local_path).await;
+    }
+}
+
+async fn cleanup_cancelled_upload(
+    manager: &SessionManager,
+    session_id: &str,
+    remote_path: &str,
+) -> AppResult<()> {
+    let sftp = open_sftp(manager, session_id).await?;
+    if sftp.metadata(remote_path).await.is_ok() {
+        let _ = sftp.remove_file(remote_path).await;
+    }
+    let _ = sftp.close().await;
+    Ok(())
+}
+
+pub async fn pause_transfer(app: tauri::AppHandle, transfer_id: &str) -> AppResult<()> {
+    if let Some(controller) = find_transfer(transfer_id) {
+        if let Some(event) = controller.pause() {
+            let _ = app.emit("transfer-event", &event);
+        }
+    }
+    Ok(())
+}
+
+pub async fn resume_transfer(app: tauri::AppHandle, transfer_id: &str) -> AppResult<()> {
+    if let Some(controller) = find_transfer(transfer_id) {
+        if let Some(event) = controller.resume() {
+            let _ = app.emit("transfer-event", &event);
+        }
+    }
+    Ok(())
+}
+
+pub async fn cancel_transfer(app: tauri::AppHandle, transfer_id: &str) -> AppResult<()> {
+    if let Some(controller) = find_transfer(transfer_id) {
+        if let Some(event) = controller.cancel() {
+            let _ = app.emit("transfer-event", &event);
+        }
+    }
+    Ok(())
 }
 
 /// Opens an SFTP session by reusing the existing SSH connection's handle.
@@ -350,6 +551,7 @@ pub async fn download_remote_file(
                         session_id: session_id.to_string(),
                         file_name: file_name.to_string(),
                         remote_path: remote_path.to_string(),
+                        local_path: local_path.to_string(),
                         direction: "download".to_string(),
                         status: "completed".to_string(),
                         size: 0,
@@ -379,6 +581,9 @@ pub async fn download_remote_file(
         {
             Ok(()) => return Ok(()),
             Err(e) => {
+                if matches!(e, AppError::Cancelled(_)) {
+                    return Err(e);
+                }
                 last_err = Some(e);
             }
         }
@@ -433,24 +638,16 @@ async fn download_remote_file_inner(
         .unwrap_or(remote_path)
         .to_string();
     let transfer_id = uuid::Uuid::new_v4().to_string();
-
-    let make_event =
-        |status: &str, bytes_transferred: u64, total_size: u64, error_msg: Option<String>| {
-            TransferEvent {
-                id: transfer_id.clone(),
-                session_id: session_id.to_string(),
-                file_name: file_name.clone(),
-                remote_path: remote_path.to_string(),
-                direction: "download".to_string(),
-                status: status.to_string(),
-                size: total_size,
-                bytes_transferred,
-                total_size,
-                error_msg,
-            }
-        };
-
-    let _ = app.emit("transfer-event", &make_event("started", 0, 0, None));
+    let controller = Arc::new(TransferController::new(
+        transfer_id,
+        session_id.to_string(),
+        file_name,
+        remote_path.to_string(),
+        actual_path.to_string(),
+        "download".to_string(),
+    ));
+    register_transfer(controller.clone());
+    let _ = app.emit("transfer-event", &controller.build_event("started", 0, None));
 
     let chunk_size = (ts.transfer_buffer_size as u64).max(1) * 1024;
     let concurrency = (ts.download_threads as usize).max(1);
@@ -468,6 +665,7 @@ async fn download_remote_file_inner(
 
         let remote_attrs = sftp.metadata(remote_path).await.ok();
         let total_size = remote_attrs.as_ref().and_then(|m| m.size).unwrap_or(0);
+        controller.update_progress(0, total_size);
 
         let mut local_file = tokio::fs::File::create(&actual_path)
             .await
@@ -501,6 +699,7 @@ async fn download_remote_file_inner(
                 if next_offset >= total_size {
                     break;
                 }
+                wait_for_transfer_ready(&controller).await?;
                 let len = chunk_size.min(total_size - next_offset) as usize;
                 let offset = next_offset;
                 next_offset += len as u64;
@@ -519,6 +718,7 @@ async fn download_remote_file_inner(
             }
 
             while let Some(res) = join_set.join_next().await {
+                wait_for_transfer_ready(&controller).await?;
                 let (chunk_offset, data, fh) =
                     res.map_err(|e| AppError::Channel(format!("Task panicked: {}", e)))??;
 
@@ -532,16 +732,18 @@ async fn download_remote_file_inner(
                     .map_err(|e| AppError::Channel(format!("Local write failed: {}", e)))?;
 
                 bytes_transferred += data.len() as u64;
+                controller.update_progress(bytes_transferred, total_size);
 
                 if last_progress.elapsed() >= PROGRESS_INTERVAL {
                     last_progress = Instant::now();
                     let _ = app.emit(
                         "transfer-event",
-                        &make_event("progress", bytes_transferred, total_size, None),
+                        &controller.build_event("progress", total_size, None),
                     );
                 }
 
                 if next_offset < total_size {
+                    wait_for_transfer_ready(&controller).await?;
                     let len = chunk_size.min(total_size - next_offset) as usize;
                     let offset = next_offset;
                     next_offset += len as u64;
@@ -568,6 +770,7 @@ async fn download_remote_file_inner(
             let seq_chunk = (chunk_size as usize).max(64 * 1024);
             let mut buf = vec![0u8; seq_chunk];
             loop {
+                wait_for_transfer_ready(&controller).await?;
                 let n = remote_file
                     .read(&mut buf)
                     .await
@@ -580,12 +783,13 @@ async fn download_remote_file_inner(
                     .await
                     .map_err(|e| AppError::Channel(format!("Write failed: {}", e)))?;
                 bytes_transferred += n as u64;
+                controller.update_progress(bytes_transferred, 0);
 
                 if last_progress.elapsed() >= PROGRESS_INTERVAL {
                     last_progress = Instant::now();
                     let _ = app.emit(
                         "transfer-event",
-                        &make_event("progress", bytes_transferred, 0, None),
+                        &controller.build_event("progress", 0, None),
                     );
                 }
             }
@@ -618,14 +822,21 @@ async fn download_remote_file_inner(
 
     match result {
         Ok(size) => {
-            let _ = app.emit("transfer-event", &make_event("completed", size, size, None));
+            controller.update_progress(size, size);
+            let _ = app.emit("transfer-event", &controller.build_event("completed", size, None));
+            unregister_transfer(&controller.id());
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit(
-                "transfer-event",
-                &make_event("error", 0, 0, Some(e.to_string())),
-            );
+            if matches!(e, AppError::Cancelled(_)) {
+                cleanup_cancelled_download(actual_path).await;
+            } else {
+                let _ = app.emit(
+                    "transfer-event",
+                    &controller.build_event("error", 0, Some(e.to_string())),
+                );
+            }
+            unregister_transfer(&controller.id());
             Err(e)
         }
     }
@@ -661,6 +872,7 @@ pub async fn upload_local_file(
                     session_id: session_id.to_string(),
                     file_name: file_name.to_string(),
                     remote_path: remote_path.to_string(),
+                    local_path: local_path.to_string(),
                     direction: "upload".to_string(),
                     status: "completed".to_string(),
                     size: 0,
@@ -692,6 +904,9 @@ pub async fn upload_local_file(
         {
             Ok(()) => return Ok(()),
             Err(e) => {
+                if matches!(e, AppError::Cancelled(_)) {
+                    return Err(e);
+                }
                 last_err = Some(e);
             }
         }
@@ -757,24 +972,16 @@ async fn upload_local_file_inner(
         .unwrap_or(remote_path)
         .to_string();
     let transfer_id = uuid::Uuid::new_v4().to_string();
-
-    let make_event =
-        |status: &str, bytes_transferred: u64, total_size: u64, error_msg: Option<String>| {
-            TransferEvent {
-                id: transfer_id.clone(),
-                session_id: session_id.to_string(),
-                file_name: file_name.clone(),
-                remote_path: remote_path.to_string(),
-                direction: "upload".to_string(),
-                status: status.to_string(),
-                size: total_size,
-                bytes_transferred,
-                total_size,
-                error_msg,
-            }
-        };
-
-    let _ = app.emit("transfer-event", &make_event("started", 0, 0, None));
+    let controller = Arc::new(TransferController::new(
+        transfer_id,
+        session_id.to_string(),
+        file_name,
+        remote_path.to_string(),
+        local_path.to_string(),
+        "upload".to_string(),
+    ));
+    register_transfer(controller.clone());
+    let _ = app.emit("transfer-event", &controller.build_event("started", 0, None));
 
     let chunk_size = ((ts.transfer_buffer_size as usize).max(1)) * 1024;
     let concurrency = (ts.upload_threads as usize).max(1);
@@ -782,6 +989,7 @@ async fn upload_local_file_inner(
     let result: AppResult<u64> = async {
         let local_meta = tokio::fs::metadata(local_path).await;
         let total_size = local_meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        controller.update_progress(0, total_size);
 
         let sftp = open_sftp(manager, session_id).await?;
         let mut bytes_transferred: u64 = 0;
@@ -820,6 +1028,7 @@ async fn upload_local_file_inner(
                 if next_offset >= total_size {
                     break;
                 }
+                wait_for_transfer_ready(&controller).await?;
                 let len = chunk_size.min((total_size - next_offset) as usize);
                 let offset = next_offset;
                 next_offset += len as u64;
@@ -848,20 +1057,23 @@ async fn upload_local_file_inner(
             }
 
             while let Some(res) = join_set.join_next().await {
+                wait_for_transfer_ready(&controller).await?;
                 let (written, local_fh, remote_fh) =
                     res.map_err(|e| AppError::Channel(format!("Task panicked: {}", e)))??;
 
                 bytes_transferred += written as u64;
+                controller.update_progress(bytes_transferred, total_size);
 
                 if last_progress.elapsed() >= PROGRESS_INTERVAL {
                     last_progress = Instant::now();
                     let _ = app.emit(
                         "transfer-event",
-                        &make_event("progress", bytes_transferred, total_size, None),
+                        &controller.build_event("progress", total_size, None),
                     );
                 }
 
                 if next_offset < total_size {
+                    wait_for_transfer_ready(&controller).await?;
                     let len = chunk_size.min((total_size - next_offset) as usize);
                     let offset = next_offset;
                     next_offset += len as u64;
@@ -923,14 +1135,21 @@ async fn upload_local_file_inner(
 
     match result {
         Ok(size) => {
-            let _ = app.emit("transfer-event", &make_event("completed", size, size, None));
+            controller.update_progress(size, size);
+            let _ = app.emit("transfer-event", &controller.build_event("completed", size, None));
+            unregister_transfer(&controller.id());
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit(
-                "transfer-event",
-                &make_event("error", 0, 0, Some(e.to_string())),
-            );
+            if matches!(e, AppError::Cancelled(_)) {
+                let _ = cleanup_cancelled_upload(manager, session_id, remote_path).await;
+            } else {
+                let _ = app.emit(
+                    "transfer-event",
+                    &controller.build_event("error", 0, Some(e.to_string())),
+                );
+            }
+            unregister_transfer(&controller.id());
             Err(e)
         }
     }

@@ -159,3 +159,18 @@ pub async fn upload_local_directory(
     )
     .await
 }
+
+#[tauri::command]
+pub async fn pause_transfer(app: tauri::AppHandle, transfer_id: String) -> AppResult<()> {
+    sftp::pause_transfer(app, &transfer_id).await
+}
+
+#[tauri::command]
+pub async fn resume_transfer(app: tauri::AppHandle, transfer_id: String) -> AppResult<()> {
+    sftp::resume_transfer(app, &transfer_id).await
+}
+
+#[tauri::command]
+pub async fn cancel_transfer(app: tauri::AppHandle, transfer_id: String) -> AppResult<()> {
+    sftp::cancel_transfer(app, &transfer_id).await
+}
