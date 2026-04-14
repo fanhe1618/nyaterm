@@ -427,9 +427,11 @@ pub fn import_sessions(app: tauri::AppHandle, file_path: String) -> AppResult<us
             auth: Some(ConnectionAuth {
                 mode: sess.auth_type,
                 password_id: None,
+                password: None,
                 key_id: None,
                 otp_id: None,
                 auto_fill_otp: false,
+                has_password: false,
             }),
             network: None,
         });

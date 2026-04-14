@@ -73,12 +73,18 @@ pub struct ConnectionAuth {
     pub mode: String,
     #[serde(default)]
     pub password_id: Option<String>,
+    /// Inline password: AES-encrypted on disk, plaintext from frontend during save.
+    #[serde(default)]
+    pub password: Option<String>,
     #[serde(default)]
     pub key_id: Option<String>,
     #[serde(default)]
     pub otp_id: Option<String>,
     #[serde(default)]
     pub auto_fill_otp: bool,
+    /// Transient flag: true when an inline password exists on disk (never serialized).
+    #[serde(default, skip_serializing)]
+    pub has_password: bool,
 }
 
 fn default_auth_mode() -> String {

@@ -106,6 +106,10 @@ export interface SavedPassword {
 export interface ConnectionAuth {
   mode: string;
   password_id?: string;
+  /** Inline password (plaintext when saving, absent when loading). */
+  password?: string;
+  /** True when an inline password is stored on disk (set by backend on load). */
+  has_password?: boolean;
   key_id?: string;
   otp_id?: string;
   auto_fill_otp?: boolean;

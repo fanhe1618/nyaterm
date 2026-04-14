@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MdChevronRight, MdExpandMore, MdSettings } from "react-icons/md";
+import { MdChevronRight, MdClose, MdExpandMore, MdSettings } from "react-icons/md";
 import { ConnectionCombobox, type ConnectionOption } from "@/components/dialog/network/shared";
 import { KeyManagementTab } from "@/components/panel/security-auth/KeyManagementTab";
 import { PasswordManagementTab } from "@/components/panel/security-auth/PasswordManagementTab";
@@ -34,6 +34,10 @@ interface SshFormProps {
   setAuthType: (v: "password" | "key") => void;
   passwordId: string;
   setPasswordId: (v: string) => void;
+  password: string;
+  setPassword: (v: string) => void;
+  hasPassword: boolean;
+  setHasPassword: (v: boolean) => void;
   keyId: string;
   setKeyId: (v: string) => void;
   proxyId: string;
@@ -60,6 +64,10 @@ export function SshForm({
   setAuthType,
   passwordId,
   setPasswordId,
+  password,
+  setPassword,
+  hasPassword,
+  setHasPassword,
   keyId,
   setKeyId,
   proxyId,
@@ -207,10 +215,46 @@ export function SshForm({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="password" className="mt-3 border-0 outline-none">
+          <TabsContent value="password" className="mt-3 border-0 outline-none space-y-3">
+            <div>
+              <Label className="text-[0.6875rem] text-muted-foreground">
+                {t("dialog.inputPassword")}
+              </Label>
+              <div className="relative mt-1">
+                <Input
+                  type="password"
+                  className="text-xs h-8 pr-8"
+                  placeholder={
+                    hasPassword && !password
+                      ? t("dialog.passwordAlreadySet")
+                      : t("dialog.passwordPlaceholder")
+                  }
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (e.target.value) {
+                      setPasswordId("");
+                      setHasPassword(false);
+                    }
+                  }}
+                />
+                {(password || hasPassword) && (
+                  <button
+                    type="button"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-sm text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => {
+                      setPassword("");
+                      setHasPassword(false);
+                    }}
+                  >
+                    <MdClose className="text-sm" />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="relative" ref={passwordRef}>
               <Label className="text-[0.6875rem] text-muted-foreground">
-                {t("dialog.password")}
+                {t("dialog.selectPassword")}
               </Label>
               <Button
                 type="button"
@@ -241,6 +285,7 @@ export function SshForm({
                         className={`px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-accent ${passwordId === p.id ? "bg-primary/15 text-primary" : ""}`}
                         onClick={() => {
                           setPasswordId(p.id);
+                          setPassword("");
                           setShowPasswordDropdown(false);
                         }}
                       >

@@ -30,6 +30,8 @@ export default function NewSessionPage() {
   const autoConnect = params.get("autoConnect") === "1";
   const targetLeafId = params.get("targetLeafId") ?? undefined;
   const anchorTabId = params.get("anchorTabId") ?? undefined;
+  const sourceTabId = params.get("sourceTabId") ?? undefined;
+  const sourcePaneId = params.get("sourcePaneId") ?? undefined;
 
   const [initialData, setInitialData] = useState<SavedConnection | undefined>();
   const [name, setName] = useState("");
@@ -42,6 +44,8 @@ export default function NewSessionPage() {
   const [username, setUsername] = useState("root");
   const [authType, setAuthType] = useState<"password" | "key">("password");
   const [passwordId, setPasswordId] = useState("");
+  const [password, setPassword] = useState("");
+  const [hasPassword, setHasPassword] = useState(false);
   const [keyId, setKeyId] = useState("");
   const [iconKey, setIconKey] = useState("");
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -138,6 +142,7 @@ export default function NewSessionPage() {
           setUsername(found.username || "root");
           setAuthType((found.auth?.mode as "password" | "key") || "password");
           setPasswordId(found.auth?.password_id || "");
+          setHasPassword(found.auth?.has_password || false);
           setKeyId(found.auth?.key_id || "");
           setProxyId(found.network?.proxy_id || "");
           setJumpHostId(found.network?.proxy_jump_id || "");
@@ -193,6 +198,8 @@ export default function NewSessionPage() {
     setUsername("root");
     setAuthType("password");
     setPasswordId("");
+    setPassword("");
+    setHasPassword(false);
     setKeyId("");
     setIconKey("");
     setProxyId("");
@@ -336,7 +343,12 @@ export default function NewSessionPage() {
               username,
               auth: {
                 mode: authType,
-                password_id: authType === "password" && passwordId ? passwordId : undefined,
+                password_id:
+                  authType === "password" ? (passwordId || "") : undefined,
+                password:
+                  authType === "password"
+                    ? password || (hasPassword ? undefined : "")
+                    : undefined,
                 key_id: authType === "key" && keyId ? keyId : undefined,
                 otp_id: otpId || undefined,
                 auto_fill_otp: otpId ? autoFillOtp : undefined,
@@ -366,6 +378,8 @@ export default function NewSessionPage() {
           connectionId: initialData?.id || savedId,
           targetLeafId,
           anchorTabId,
+          sourceTabId,
+          sourcePaneId,
         });
       }
       resetForm();
@@ -609,6 +623,10 @@ export default function NewSessionPage() {
               setAuthType={(value) => setAuthType(value)}
               passwordId={passwordId}
               setPasswordId={setPasswordId}
+              password={password}
+              setPassword={setPassword}
+              hasPassword={hasPassword}
+              setHasPassword={setHasPassword}
               keyId={keyId}
               setKeyId={setKeyId}
               proxyId={proxyId}

@@ -6,7 +6,14 @@ use tauri::Emitter;
 #[tauri::command]
 pub fn get_saved_connections(app: tauri::AppHandle) -> AppResult<Vec<SavedConnection>> {
     let cfg = config::load_config(&app)?;
-    Ok(cfg.connections)
+    let mut connections = cfg.connections;
+    for conn in &mut connections {
+        if let Some(ref mut auth) = conn.auth {
+            auth.has_password = auth.password.is_some();
+            auth.password = None;
+        }
+    }
+    Ok(connections)
 }
 
 #[tauri::command]
@@ -24,13 +31,27 @@ pub fn save_connection(
 
     validate_proxy_jump_config(&connection, &cfg.connections)?;
 
-    // Preserve existing password_id if not provided
     if let Some(ref mut auth) = connection.auth {
-        if auth.password_id.is_none() {
-            auth.password_id = existing
-                .and_then(|e| e.auth.as_ref())
-                .and_then(|a| a.password_id.clone());
+        // password_id: Some("") means explicitly cleared, None means preserve existing
+        match auth.password_id.as_deref() {
+            Some("") => auth.password_id = None,
+            None => {
+                auth.password_id = existing
+                    .and_then(|e| e.auth.as_ref())
+                    .and_then(|a| a.password_id.clone());
+            }
+            _ => {}
         }
+
+        // password: non-empty = encrypt new value, "" = explicitly clear, None = preserve
+        auth.password = match auth.password.as_deref() {
+            Some(plain) if !plain.is_empty() => Some(crypto::encrypt(plain)?),
+            Some("") => None,
+            None => existing
+                .and_then(|e| e.auth.as_ref())
+                .and_then(|a| a.password.clone()),
+            _ => None,
+        };
     }
 
     if let Some(ex) = cfg.connections.iter_mut().find(|c| c.id == target_id) {

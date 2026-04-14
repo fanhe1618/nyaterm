@@ -103,6 +103,12 @@ fn resolve_auth(app: &AppHandle, conn: &crate::config::SavedConnection) -> AppRe
 
     match conn_auth.mode.as_str() {
         "password" => {
+            if let Some(ref ciphertext) = conn_auth.password {
+                let password = crate::utils::crypto::decrypt(ciphertext)
+                    .map_err(|e| AppError::Auth(format!("Failed to decrypt inline password: {e}")))?;
+                return Ok(SshAuth::Password { password });
+            }
+
             let pw_id = conn_auth
                 .password_id
                 .as_deref()
