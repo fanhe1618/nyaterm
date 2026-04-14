@@ -209,13 +209,22 @@
     "uploadPrompt": "远程文件已修改，是否上传更改？"
   },
   "fileTransfer": {
-    "clearAll": "清除全部",
+    "cancel": "取消",
+    "cancelAll": "全部取消",
+    "cancelled": "已取消",
     "clearCompleted": "清除已完成",
     "completed": "已完成",
+    "delete": "删除",
     "downloadPath": "下载目录",
     "error": "错误",
     "noTransfers": "无传输记录",
     "openDownloadPath": "打开下载目录",
+    "pause": "暂停",
+    "pauseAll": "全部暂停",
+    "paused": "已暂停",
+    "resume": "继续",
+    "resumeAll": "全部继续",
+    "retry": "重试",
     "savePath": "保存至：{{path}}",
     "transferring": "传输中"
   },

@@ -209,13 +209,22 @@
     "uploadPrompt": "The remote file has been modified. Would you like to upload the changes?"
   },
   "fileTransfer": {
-    "clearAll": "Clear all",
+    "cancel": "Cancel",
+    "cancelAll": "Cancel All",
+    "cancelled": "Cancelled",
     "clearCompleted": "Clear completed",
     "completed": "Completed",
+    "delete": "Delete",
     "downloadPath": "Download Path",
     "error": "Error",
     "noTransfers": "No transfers",
     "openDownloadPath": "Open Download Path",
+    "pause": "Pause",
+    "pauseAll": "Pause All",
+    "paused": "Paused",
+    "resume": "Resume",
+    "resumeAll": "Resume All",
+    "retry": "Retry",
     "savePath": "Save to: {{path}}",
     "transferring": "Transferring"
   },
