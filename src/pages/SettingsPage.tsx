@@ -25,6 +25,7 @@ import { TerminalTab } from "@/components/settings/TerminalTab";
 import { TransferTab } from "@/components/settings/TransferTab";
 import { TranslationTab } from "@/components/settings/TranslationTab";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppContext, useApp } from "@/context/AppContext";
 import { SettingsDraftContext } from "@/context/SettingsDraftContext";
 import { getErrorMessage } from "@/lib/errors";
@@ -46,6 +47,8 @@ function getCloudSyncValidationMessage(
   switch (code) {
     case "webdavEndpointRequired":
       return t("settings.webdavEndpointRequired");
+    case "s3EndpointRequired":
+      return t("settings.s3EndpointRequired");
     case "s3BucketRequired":
       return t("settings.s3BucketRequired");
     case "s3CredentialsIncomplete":
@@ -156,30 +159,40 @@ export default function SettingsPage() {
     return <Icon className={className} />;
   }
 
-  const validateDraftSettings = useCallback(() => {
+  const getDraftSaveBlockState = useCallback(() => {
     if (!draftSettings.cloud_sync.enabled) {
-      return true;
+      return null;
     }
 
     if (!draftSettings.security.master_password) {
-      setActiveTab("syncBackup");
-      toast.error(t("settings.masterPasswordRequiredDesc"));
-      return false;
+      return {
+        message: t("settings.masterPasswordRequiredDesc"),
+        targetTab: "security" as const,
+      };
     }
 
     const errors = getCloudSyncValidationErrors(draftSettings.cloud_sync);
     if (errors.length === 0) {
-      return true;
+      return null;
     }
 
-    setActiveTab("syncBackup");
-    toast.error(getCloudSyncValidationMessage(errors[0], t));
-    return false;
+    return {
+      message: getCloudSyncValidationMessage(errors[0], t),
+      targetTab: "syncBackup" as const,
+    };
   }, [draftSettings.cloud_sync, draftSettings.security.master_password, t]);
+
+  const saveBlockState = useMemo(
+    () => (isDirty ? getDraftSaveBlockState() : null),
+    [getDraftSaveBlockState, isDirty],
+  );
+  const saveBlockedMessage = saveBlockState?.message ?? null;
 
   const saveDraftSettings = useCallback(
     async (closeAfterSave: boolean) => {
-      if (!validateDraftSettings()) {
+      const validationState = getDraftSaveBlockState();
+      if (validationState) {
+        toast.error(validationState.message);
         return;
       }
 
@@ -202,23 +215,13 @@ export default function SettingsPage() {
         setIsSaving(false);
       }
     },
-    [app, draftSettings, t, validateDraftSettings],
+    [app, draftSettings, getDraftSaveBlockState, t],
   );
 
-  const confirmDiscardChanges = useCallback(() => {
-    if (!isDirty) {
-      return true;
-    }
-    return window.confirm(t("settings.discardChangesConfirm"));
-  }, [isDirty, t]);
-
   const handleCancel = useCallback(async () => {
-    if (!confirmDiscardChanges()) {
-      return;
-    }
     setDraftSettings(committedSettings);
     await getCurrentWindow().close();
-  }, [committedSettings, confirmDiscardChanges]);
+  }, [committedSettings]);
 
   const handleConfirm = useCallback(async () => {
     if (!isDirty) {
@@ -312,16 +315,66 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/70 bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/70 bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+                <div className="min-w-0 flex-1">
+                  {saveBlockState ? (
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
+                      <span className="min-w-0 flex-1">{saveBlockedMessage}</span>
+                      {activeTab !== saveBlockState.targetTab ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => setActiveTab(saveBlockState.targetTab)}
+                        >
+                          {saveBlockState.targetTab === "security"
+                            ? t("settings.security")
+                            : t("settings.syncBackup")}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
                 <Button variant="outline" onClick={() => void handleCancel()} disabled={isSaving}>
                   {t("common.cancel")}
                 </Button>
-                <Button variant="outline" onClick={() => void handleApply()} disabled={!isDirty || isSaving}>
-                  {t("common.apply")}
-                </Button>
-                <Button onClick={() => void handleConfirm()} disabled={isSaving}>
-                  {isSaving ? t("common.saving") : t("common.confirm")}
-                </Button>
+                {saveBlockedMessage ? (
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="inline-flex">
+                          <Button variant="outline" disabled>
+                            {t("common.apply")}
+                          </Button>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{saveBlockedMessage}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="inline-flex">
+                          <Button disabled>
+                            {isSaving ? t("common.saving") : t("common.confirm")}
+                          </Button>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{saveBlockedMessage}</TooltipContent>
+                    </Tooltip>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleApply()}
+                      disabled={!isDirty || isSaving}
+                    >
+                      {t("common.apply")}
+                    </Button>
+                    <Button onClick={() => void handleConfirm()} disabled={isSaving}>
+                      {isSaving ? t("common.saving") : t("common.confirm")}
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </div>

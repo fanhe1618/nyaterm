@@ -7,6 +7,7 @@ import type {
 
 export type CloudSyncValidationCode =
   | "webdavEndpointRequired"
+  | "s3EndpointRequired"
   | "s3BucketRequired"
   | "s3CredentialsIncomplete";
 
@@ -82,6 +83,10 @@ export function getCloudSyncValidationErrors(
   }
 
   if (settings.provider === "s3") {
+    if (settings.s3.endpoint.trim().length === 0) {
+      errors.push("s3EndpointRequired");
+    }
+
     if (settings.s3.bucket.trim().length === 0) {
       errors.push("s3BucketRequired");
     }

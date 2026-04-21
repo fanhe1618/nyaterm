@@ -47,6 +47,8 @@ function getValidationMessage(
   switch (code) {
     case "webdavEndpointRequired":
       return t("settings.webdavEndpointRequired");
+    case "s3EndpointRequired":
+      return t("settings.s3EndpointRequired");
     case "s3BucketRequired":
       return t("settings.s3BucketRequired");
     case "s3CredentialsIncomplete":
@@ -71,10 +73,7 @@ export function SyncBackupTab({ onNavigateSecurity }: SyncBackupTabProps) {
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState<string | null>(null);
 
-  const validationErrors = useMemo(
-    () => getCloudSyncValidationErrors(settings),
-    [settings],
-  );
+  const validationErrors = useMemo(() => getCloudSyncValidationErrors(settings), [settings]);
   const committedValidationErrors = useMemo(
     () => getCloudSyncValidationErrors(committedCloudSync),
     [committedCloudSync],

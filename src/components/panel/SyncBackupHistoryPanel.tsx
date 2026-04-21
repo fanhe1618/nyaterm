@@ -118,7 +118,7 @@ function SyncBackupHistoryPanel() {
       <PanelHeader
         title={t("panel.syncBackupHistory")}
         actions={
-          <Button variant="ghost" size="icon-xs" onClick={() => void refresh()} disabled={loading}>
+          <Button variant="ghost" className="h-4 w-4" onClick={() => void refresh()} disabled={loading}>
             <MdRefresh />
           </Button>
         }
