@@ -40,11 +40,27 @@ The **Open** action is not just a preview. It prepares the round-trip editing fl
 
 ### Upload
 
-Use the toolbar or context menu to upload local files into the current remote directory.
+Use the toolbar, context menu, or drag and drop to upload local content into the current remote directory.
 
 - Multiple files are queued one by one
 - Folder uploads preserve directory structure
 - Good for syncing scripts, config files, or release packages
+
+### External drag-and-drop upload
+
+The file explorer supports dragging **files or folders from your system file manager directly into the Dragonfly file browser** for upload.
+
+Typical flow:
+
+1. Open an SSH session and switch to the file explorer
+2. Drag a local file or folder into the file list area
+3. Release when the drag overlay appears
+4. Dragonfly adds the dropped items to the upload flow automatically
+
+Notes:
+
+- Upload is only triggered when you drop onto the file browser list area
+- Some drag sources do not expose a real local file path. In that case, Dragonfly cannot resolve the dropped item directly and will prompt you to use **Upload File** or **Upload Folder** instead
 
 ### Download
 
