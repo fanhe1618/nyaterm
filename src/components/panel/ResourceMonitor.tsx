@@ -43,12 +43,20 @@ function formatUptime(
   return t(days === 1 ? "resourceMonitor.day" : "resourceMonitor.days", { count: days });
 }
 
+function formatPct(value: number): string {
+  return `${Math.round(Math.min(100, Math.max(0, value)))}%`;
+}
+
+function formatCores(cores: number): string {
+  return `${cores}C`;
+}
+
 function ProgressBar({ value, color }: { value: number; color: string }) {
   const pct = Math.min(100, Math.max(0, value));
   return (
     <div
-      className="h-1.5 w-full rounded-full overflow-hidden"
-      style={{ backgroundColor: "var(--df-bg)" }}
+      className="h-2 w-full rounded-full overflow-hidden"
+      style={{ backgroundColor: "color-mix(in srgb, var(--df-border) 72%, transparent)" }}
     >
       <div
         className="h-full rounded-full transition-all duration-500"
@@ -59,8 +67,14 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
 }
 
 function usageColor(pct: number): string {
-  if (pct > 80) return "#ef4444";
-  if (pct > 50) return "#f59e0b";
+  if (pct >= 90) return "#ef4444";
+  if (pct >= 80) return "#f59e0b";
+  return "var(--df-primary)";
+}
+
+function loadColor(loadRatio: number): string {
+  if (loadRatio >= 1) return "#ef4444";
+  if (loadRatio >= 0.7) return "#f59e0b";
   return "#22c55e";
 }
 
@@ -79,83 +93,15 @@ function SectionCard({
       style={{ borderColor: "var(--df-border)", backgroundColor: "var(--df-bg)" }}
     >
       <div className="flex items-center gap-1.5">
-        <span className="text-sm" style={{ color: "var(--df-text-muted)" }}>
+        <span className="text-base" style={{ color: "var(--df-text-muted)" }}>
           {icon}
         </span>
-        <span className="text-xs font-semibold" style={{ color: "var(--df-text)" }}>
+        <span className="text-[0.8125rem] font-semibold" style={{ color: "var(--df-text)" }}>
           {title}
         </span>
       </div>
       {children}
     </div>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-[0.6875rem] shrink-0" style={{ color: "var(--df-text-muted)" }}>
-        {label}
-      </span>
-      <span
-        className="text-[0.6875rem] font-mono truncate text-right"
-        style={{ color: valueColor ?? "var(--df-primary)" }}
-        title={value}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function MemoryDonut({ used, available }: { used: number; available: number }) {
-  const total = used + available;
-  if (total <= 0) return null;
-  const radius = 36;
-  const stroke = 8;
-  const circumference = 2 * Math.PI * radius;
-
-  const usedPct = used / total;
-  const usedLen = usedPct * circumference;
-
-  return (
-    <svg width="80" height="80" viewBox="0 0 96 96" aria-hidden="true">
-      {/* Available (green) - full ring background */}
-      <circle
-        cx="48"
-        cy="48"
-        r={radius}
-        fill="none"
-        stroke="#22c55e"
-        strokeWidth={stroke}
-        strokeDasharray={`${circumference} 0`}
-        strokeDashoffset={0}
-        transform="rotate(-90 48 48)"
-        strokeLinecap="round"
-      />
-      {/* Used (red) - overwrites from start */}
-      <circle
-        cx="48"
-        cy="48"
-        r={radius}
-        fill="none"
-        stroke="#ef4444"
-        strokeWidth={stroke}
-        strokeDasharray={`${usedLen} ${circumference - usedLen}`}
-        strokeDashoffset={0}
-        transform="rotate(-90 48 48)"
-        strokeLinecap="round"
-        className="transition-all duration-500"
-      />
-    </svg>
   );
 }
 
@@ -226,6 +172,7 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
 
   const memTotal = stats ? stats.memory.used + stats.memory.available : 0;
   const memUsedPct = memTotal > 0 ? (stats!.memory.used / memTotal) * 100 : 0;
+  const loadRatio = stats && stats.cpu.cores > 0 ? stats.load.load1 / stats.cpu.cores : 0;
 
   return (
     <div className="h-full flex flex-col" style={{ backgroundColor: "var(--df-bg-panel)" }}>
@@ -261,17 +208,72 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
           <div className="space-y-3">
             {/* System */}
             <SectionCard icon={<MdComputer />} title={t("resourceMonitor.system")}>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                <InfoRow
-                  label={`${t("resourceMonitor.hostname")}:`}
-                  value={stats.system.hostname}
-                />
-                <InfoRow
-                  label={`${t("resourceMonitor.uptime")}:`}
-                  value={formatUptime(stats.system.uptime_sec, t)}
-                />
-                <InfoRow label={`${t("resourceMonitor.os")}:`} value={stats.system.os} />
-                <InfoRow label={`${t("resourceMonitor.arch")}:`} value={stats.system.arch} />
+              <div className="space-y-1">
+                <div
+                  className="truncate text-sm font-semibold"
+                  style={{ color: "var(--df-text)" }}
+                  title={stats.system.hostname}
+                >
+                  {stats.system.hostname}
+                </div>
+                <div
+                  className="text-xs leading-relaxed"
+                  style={{ color: "var(--df-text-muted)" }}
+                  title={`${stats.system.os} · ${stats.system.arch} · ${formatUptime(
+                    stats.system.uptime_sec,
+                    t,
+                  )}`}
+                >
+                  <span className="break-words">{stats.system.os}</span>
+                  <span className="mx-1.5" style={{ color: "var(--df-text-dimmed)" }}>
+                    ·
+                  </span>
+                  <span>{stats.system.arch}</span>
+                  <span className="mx-1.5" style={{ color: "var(--df-text-dimmed)" }}>
+                    ·
+                  </span>
+                  <span>{formatUptime(stats.system.uptime_sec, t)}</span>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* CPU */}
+            <SectionCard icon={<LuCpu />} title={t("resourceMonitor.cpu")}>
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-sm font-mono" style={{ color: "var(--df-text)" }}>
+                    {stats.cpu.usage.toFixed(1)}%
+                  </span>
+                  <span className="text-xs" style={{ color: "var(--df-text-muted)" }}>
+                    {formatCores(stats.cpu.cores)}
+                  </span>
+                </div>
+                <ProgressBar value={stats.cpu.usage} color={usageColor(stats.cpu.usage)} />
+              </div>
+            </SectionCard>
+
+            {/* Memory */}
+            <SectionCard icon={<FaMemory />} title={t("resourceMonitor.memory")}>
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-xs font-mono" style={{ color: "var(--df-text)" }}>
+                    {formatBytes(stats.memory.used)} / {formatBytes(memTotal)}
+                  </span>
+                  <span className="text-sm font-mono" style={{ color: usageColor(memUsedPct) }}>
+                    {formatPct(memUsedPct)}
+                  </span>
+                </div>
+                <ProgressBar value={memUsedPct} color={usageColor(memUsedPct)} />
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                  <MetricText
+                    label={t("resourceMonitor.available")}
+                    value={formatBytes(stats.memory.available)}
+                  />
+                  <MetricText
+                    label={t("resourceMonitor.cached")}
+                    value={formatBytes(stats.memory.cached)}
+                  />
+                </div>
               </div>
             </SectionCard>
 
@@ -280,190 +282,66 @@ export default function ResourceMonitor({ activeSessionId }: ResourceMonitorProp
               icon={<MdOutlineLocalFireDepartment />}
               title={t("resourceMonitor.systemLoad")}
             >
-              <div className="flex items-center justify-between gap-2">
-                <LoadValue label={t("resourceMonitor.Load1")} value={stats.load.load1} />
-                <LoadValue label={t("resourceMonitor.Load5")} value={stats.load.load5} />
-                <LoadValue label={t("resourceMonitor.Load15")} value={stats.load.load15} />
-              </div>
-            </SectionCard>
-
-            {/* CPU */}
-            <SectionCard icon={<LuCpu />} title={t("resourceMonitor.cpu")}>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className="text-[0.6875rem] font-mono"
-                    style={{ color: "var(--df-text-muted)" }}
-                  >
-                    {stats.cpu.cores}
-                  </span>
-                  <div className="flex-1 mx-2">
-                    <ProgressBar value={stats.cpu.usage} color={usageColor(stats.cpu.usage)} />
-                  </div>
-                  <span
-                    className="text-[0.6875rem] font-mono shrink-0"
-                    style={{ color: "var(--df-text)" }}
-                  >
-                    {stats.cpu.usage.toFixed(1)}%
-                  </span>
-                </div>
-              </div>
-            </SectionCard>
-
-            {/* Memory */}
-            <SectionCard icon={<FaMemory />} title={t("resourceMonitor.memory")}>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 space-y-1">
-                  <div className="text-xs font-mono" style={{ color: "var(--df-text)" }}>
-                    <span style={{ color: usageColor(memUsedPct) }}>
-                      {formatBytes(stats.memory.used)}
-                    </span>
-                    {" / "}
-                    {formatBytes(memTotal)}
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                    <LegendDot
-                      color="#ef4444"
-                      label={t("resourceMonitor.used")}
-                      value={formatBytes(stats.memory.used)}
-                    />
-                    <LegendDot
-                      color="#22c55e"
-                      label={t("resourceMonitor.available")}
-                      value={formatBytes(stats.memory.available)}
-                    />
-                    <LegendDot
-                      color="#6b7280"
-                      label={t("resourceMonitor.cached")}
-                      value={formatBytes(stats.memory.cached)}
-                    />
-                  </div>
-                </div>
-                <div className="shrink-0">
-                  <MemoryDonut used={stats.memory.used} available={stats.memory.available} />
-                </div>
-              </div>
-            </SectionCard>
-
-            {/* Network */}
-            <SectionCard icon={<MdSwapVert />} title={t("resourceMonitor.network")}>
               <div className="space-y-1.5">
-                <div className="grid grid-cols-3 gap-1">
-                  <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
-                    {t("resourceMonitor.nic")}
-                  </span>
+                <div className="flex items-center justify-between gap-3">
                   <span
-                    className="text-[0.625rem] text-center"
-                    style={{ color: "var(--df-text-dimmed)" }}
+                    className="text-xs font-medium"
+                    style={{ color: loadColor(loadRatio) }}
+                    title={`${t("resourceMonitor.Load1")} / ${formatCores(stats.cpu.cores)}`}
                   >
-                    {t("resourceMonitor.send")}
+                    {formatPct(loadRatio * 100)}
                   </span>
-                  <span
-                    className="text-[0.625rem] text-right"
-                    style={{ color: "var(--df-text-dimmed)" }}
-                  >
-                    {t("resourceMonitor.receive")}
+                  <span className="text-xs" style={{ color: "var(--df-text-muted)" }}>
+                    {formatCores(stats.cpu.cores)}
                   </span>
                 </div>
-                {stats.networks.map((net) => (
-                  <div key={net.nic} className="grid grid-cols-3 gap-1">
-                    <span
-                      className="text-[0.6875rem] font-mono truncate"
-                      style={{ color: "var(--df-text)" }}
-                    >
-                      {net.nic}
-                    </span>
-                    <span
-                      className="text-[0.6875rem] font-mono text-center"
-                      style={{ color: "var(--df-text)" }}
-                    >
-                      {formatRate(net.tx_bytes_per_sec)}
-                    </span>
-                    <span
-                      className="text-[0.6875rem] font-mono text-right"
-                      style={{ color: "var(--df-text)" }}
-                    >
-                      {formatRate(net.rx_bytes_per_sec)}
-                    </span>
-                  </div>
-                ))}
-                {stats.networks.length === 0 && (
-                  <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
-                    -
-                  </span>
-                )}
+                <div className="grid grid-cols-3 gap-2">
+                  <LoadValue label={t("resourceMonitor.Load1")} value={stats.load.load1} />
+                  <LoadValue label={t("resourceMonitor.Load5")} value={stats.load.load5} />
+                  <LoadValue label={t("resourceMonitor.Load15")} value={stats.load.load15} />
+                </div>
               </div>
             </SectionCard>
 
             {/* Disk */}
             <SectionCard icon={<MdStorage />} title={t("resourceMonitor.disk")}>
               {stats.disks.length > 0 ? (
-                <div className="space-y-1.5">
-                  <div className="grid grid-cols-4 gap-1">
-                    <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
-                      {t("resourceMonitor.mountPath")}
-                    </span>
-                    <span
-                      className="text-[0.625rem] text-center"
-                      style={{ color: "var(--df-text-dimmed)" }}
-                    >
-                      {t("resourceMonitor.totalSize")}
-                    </span>
-                    <span
-                      className="text-[0.625rem] text-center"
-                      style={{ color: "var(--df-text-dimmed)" }}
-                    >
-                      {t("resourceMonitor.availSpace")}
-                    </span>
-                    <span
-                      className="text-[0.625rem] text-right"
-                      style={{ color: "var(--df-text-dimmed)" }}
-                    >
-                      {t("resourceMonitor.usagePercent")}
-                    </span>
-                  </div>
+                <div>
                   {stats.disks.map((disk) => (
-                    <div key={`${disk.device}-${disk.mount}`} className="space-y-1">
-                      <div className="grid grid-cols-4 gap-1 items-center">
-                        <span
-                          className="text-[0.6875rem] font-mono truncate"
-                          style={{ color: "var(--df-text)" }}
-                          title={disk.mount}
-                        >
-                          {disk.mount}
-                        </span>
-                        <span
-                          className="text-[0.6875rem] font-mono text-center"
-                          style={{ color: "var(--df-text)" }}
-                        >
-                          {formatBytes(disk.total)}
-                        </span>
-                        <span
-                          className="text-[0.6875rem] font-mono text-center"
-                          style={{ color: "var(--df-text)" }}
-                        >
-                          {formatBytes(disk.available)}
-                        </span>
-                        <div className="flex items-center justify-end gap-1">
-                          <div className="flex-1 max-w-[3rem]">
-                            <ProgressBar
-                              value={disk.use_percent}
-                              color={usageColor(disk.use_percent)}
-                            />
-                          </div>
-                          <span
-                            className="text-[0.625rem] font-mono shrink-0"
-                            style={{ color: usageColor(disk.use_percent) }}
-                          >
-                            {disk.use_percent}%
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                    <DiskRow
+                      key={`${disk.device}-${disk.mount}`}
+                      mount={disk.mount}
+                      total={disk.total}
+                      available={disk.available}
+                      availableLabel={t("resourceMonitor.available")}
+                      usePercent={disk.use_percent}
+                    />
                   ))}
                 </div>
               ) : (
-                <span className="text-[0.625rem]" style={{ color: "var(--df-text-dimmed)" }}>
+                <span className="text-xs" style={{ color: "var(--df-text-dimmed)" }}>
+                  -
+                </span>
+              )}
+            </SectionCard>
+
+            {/* Network */}
+            <SectionCard icon={<MdSwapVert />} title={t("resourceMonitor.network")}>
+              {stats.networks.length > 0 ? (
+                <div>
+                  {stats.networks.map((net) => (
+                    <NetworkRow
+                      key={net.nic}
+                      nic={net.nic}
+                      tx={net.tx_bytes_per_sec}
+                      rx={net.rx_bytes_per_sec}
+                      txLabel={t("resourceMonitor.send")}
+                      rxLabel={t("resourceMonitor.receive")}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <span className="text-xs" style={{ color: "var(--df-text-dimmed)" }}>
                   -
                 </span>
               )}
@@ -483,7 +361,7 @@ function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
       <span className="text-2xl" style={{ color: "var(--df-text-dimmed)" }}>
         {icon}
       </span>
-      <span className="text-xs" style={{ color: "var(--df-text-muted)" }}>
+      <span className="text-sm" style={{ color: "var(--df-text-muted)" }}>
         {text}
       </span>
     </div>
@@ -521,33 +399,106 @@ function LoadingSpinner({ label }: { label: string }) {
 
 function LoadValue({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center gap-1">
-      <span className="text-[0.6875rem]" style={{ color: "var(--df-text-muted)" }}>
+    <div className="min-w-0">
+      <span className="text-xs" style={{ color: "var(--df-text-muted)" }}>
         {label}
       </span>
-      <span
-        className="text-[0.6875rem] font-mono font-medium"
-        style={{ color: "var(--df-primary)" }}
-      >
+      <span className="ml-1 text-xs font-mono font-medium" style={{ color: "var(--df-text)" }}>
         {value.toFixed(2)}
       </span>
     </div>
   );
 }
 
-function LegendDot({ color, label, value }: { color: string; label: string; value: string }) {
+function MetricText({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center gap-1">
-      <span
-        className="inline-block w-2 h-2 rounded-full shrink-0"
-        style={{ backgroundColor: color }}
-      />
-      <span className="text-[0.625rem]" style={{ color: "var(--df-text-muted)" }}>
+    <div className="flex min-w-0 items-center gap-1">
+      <span className="text-[0.6875rem]" style={{ color: "var(--df-text-muted)" }}>
         {label}
       </span>
-      <span className="text-[0.625rem] font-mono" style={{ color: "var(--df-text)" }}>
+      <span className="text-[0.6875rem] font-mono" style={{ color: "var(--df-text)" }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+function DiskRow({
+  mount,
+  total,
+  available,
+  availableLabel,
+  usePercent,
+}: {
+  mount: string;
+  total: number;
+  available: number;
+  availableLabel: string;
+  usePercent: number;
+}) {
+  return (
+    <div
+      className="space-y-1.5 border-b py-2 first:pt-0 last:border-b-0 last:pb-0"
+      style={{ borderColor: "var(--df-border)" }}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <span
+          className="min-w-0 truncate text-xs font-mono"
+          style={{ color: "var(--df-text)" }}
+          title={mount}
+        >
+          {mount}
+        </span>
+        <span className="shrink-0 text-xs font-mono" style={{ color: usageColor(usePercent) }}>
+          {formatPct(usePercent)}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+        <span className="text-[0.6875rem] font-mono" style={{ color: "var(--df-text-muted)" }}>
+          {formatBytes(total)}
+        </span>
+        <MetricText label={availableLabel} value={formatBytes(available)} />
+      </div>
+      <ProgressBar value={usePercent} color={usageColor(usePercent)} />
+    </div>
+  );
+}
+
+function NetworkRow({
+  nic,
+  tx,
+  rx,
+  txLabel,
+  rxLabel,
+}: {
+  nic: string;
+  tx: number;
+  rx: number;
+  txLabel: string;
+  rxLabel: string;
+}) {
+  return (
+    <div
+      className="space-y-1 border-b py-2 first:pt-0 last:border-b-0 last:pb-0"
+      style={{ borderColor: "var(--df-border)" }}
+    >
+      <div className="truncate text-xs font-mono" style={{ color: "var(--df-text)" }} title={nic}>
+        {nic}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <span
+          className="min-w-0 truncate text-xs font-mono"
+          style={{ color: "var(--df-text-muted)" }}
+        >
+          ↑ {txLabel} {formatRate(tx)}
+        </span>
+        <span
+          className="min-w-0 truncate text-right text-xs font-mono"
+          style={{ color: "var(--df-text-muted)" }}
+        >
+          ↓ {rxLabel} {formatRate(rx)}
+        </span>
+      </div>
     </div>
   );
 }
