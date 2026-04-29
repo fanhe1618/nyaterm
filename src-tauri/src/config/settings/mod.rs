@@ -1,5 +1,5 @@
-mod appearance;
 mod ai;
+mod appearance;
 mod diagnostics;
 mod general;
 mod interaction;
@@ -10,11 +10,13 @@ mod terminal;
 mod transfer;
 mod translation;
 
-pub use appearance::AppearanceSettings;
 pub use ai::{
-    decrypt_ai_settings, encrypt_ai_settings, mask_ai_settings, merge_masked_ai_settings,
-    AiProviderKind, AiProviderProfile, AiSettings,
+    ai_model_id_for_credential, ai_model_id_for_provider, decrypt_ai_settings,
+    encrypt_ai_settings, mask_ai_settings, merge_masked_ai_settings, normalize_ai_settings,
+    AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelSource, AiProviderCredential,
+    AiProviderKind, AiProviderProfile, AiRiskLevel, AiSettings,
 };
+pub use appearance::AppearanceSettings;
 pub use diagnostics::{DiagnosticsLogLevel, DiagnosticsSettings};
 pub use general::GeneralSettings;
 pub use interaction::InteractionSettings;
@@ -30,7 +32,7 @@ use super::cloud_sync::{
     CloudSyncSettings,
 };
 use super::ui::UiConfig;
-use super::{get_config_dir, load_json, save_json};
+use super::{load_json_doc, save_json_doc};
 use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -66,9 +68,7 @@ pub struct AppSettings {
 }
 
 pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
-    let dir = get_config_dir(app)?;
-    let settings_path = dir.join("settings.json");
-    let mut settings: AppSettings = load_json(&settings_path)?;
+    let mut settings: AppSettings = load_json_doc(crate::storage::JSON_SETTINGS)?;
     let has_embedded_cloud_sync = super::load_json_raw_doc(crate::storage::JSON_SETTINGS)?
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .and_then(|value| value.get("cloud_sync").cloned())
@@ -88,6 +88,9 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
 
     if let Ok(ai_settings) = decrypt_ai_settings(settings.ai.clone()) {
         settings.ai = ai_settings;
+    }
+    if normalize_ai_settings(&mut settings.ai) {
+        migrated = true;
     }
 
     for list in [
@@ -243,6 +246,6 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
 }
 
 pub fn save_app_settings(app: &AppHandle, config: &AppSettings) -> AppResult<()> {
-    let dir = get_config_dir(app)?;
-    save_json(&dir.join("settings.json"), config)
+    let _ = app;
+    save_json_doc(crate::storage::JSON_SETTINGS, config)
 }

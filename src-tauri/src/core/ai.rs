@@ -1,4 +1,7 @@
-use crate::config::{self, AiProviderKind, AiProviderProfile, AiSettings};
+use crate::config::{
+    self, ai_model_id_for_credential, AiMode, AiModelConfigItem, AiModelSource,
+    AiProviderCredential, AiProviderKind, AiSettings,
+};
 use crate::error::{AppError, AppResult};
 use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
@@ -8,7 +11,7 @@ use genai::{Client, ModelIden};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -21,6 +24,12 @@ pub enum RiskLevel {
     Medium,
     High,
     Critical,
+}
+
+impl Default for RiskLevel {
+    fn default() -> Self {
+        Self::Medium
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +83,8 @@ pub enum AiAction {
     ExplainSelected,
     AnalyzeError,
     RepairFromSelection,
+    CustomTerminalAction,
+    CustomFileAction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -87,6 +98,8 @@ pub struct AiRequestOptions {
     pub safety_mode: String,
     #[serde(default = "default_history_turns")]
     pub history_turns: u16,
+    #[serde(default = "default_allowed_command_risk_level")]
+    pub allowed_command_risk_level: RiskLevel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +111,12 @@ pub struct AiChatRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub connection_id: Option<String>,
+    #[serde(default = "default_mode")]
+    pub mode: AiMode,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub model_name: Option<String>,
     pub action: AiAction,
     pub user_input: String,
     #[serde(default)]
@@ -254,6 +273,18 @@ struct AiModelOutput {
     command_cards: Vec<AiCommandCard>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiModelDiscovery {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub provider_kind: Option<AiProviderKind>,
+    #[serde(default)]
+    pub credential_id: Option<String>,
+    pub source: AiModelSource,
+}
+
 struct RiskPattern {
     regex: Regex,
     level: RiskLevel,
@@ -298,6 +329,14 @@ fn default_safety_mode() -> String {
 
 fn default_history_turns() -> u16 {
     20
+}
+
+fn default_allowed_command_risk_level() -> RiskLevel {
+    RiskLevel::Medium
+}
+
+fn default_mode() -> AiMode {
+    AiMode::Ask
 }
 
 fn now_rfc3339() -> String {
@@ -501,8 +540,8 @@ async fn run_model_stream(
     settings: &AiSettings,
     cancel_rx: &mut oneshot::Receiver<()>,
 ) -> AppResult<AiStreamResult> {
-    let profile = active_profile(settings)?;
-    let client = build_client(profile)?;
+    let resolved_model = resolve_request_model(settings, request)?;
+    let client = build_client(&resolved_model)?;
     let prompt = build_prompt(request, settings);
 
     let mut messages = vec![ChatMessage::system(SYSTEM_PROMPT)];
@@ -539,13 +578,12 @@ async fn run_model_stream(
 
     let chat_req = ChatRequest::new(messages);
     let chat_options = ChatOptions::default()
-        .with_max_tokens(settings.max_output_tokens)
         .with_capture_reasoning_content(true)
         .with_normalize_reasoning_content(true);
 
     let stream_result = tokio::time::timeout(
         Duration::from_millis(settings.timeout_ms),
-        client.exec_chat_stream(&profile.model, chat_req, Some(&chat_options)),
+        client.exec_chat_stream(&resolved_model.model_name, chat_req, Some(&chat_options)),
     )
     .await
     .map_err(|_| AppError::Config("AI request timed out".to_string()))?
@@ -554,18 +592,20 @@ async fn run_model_stream(
     let mut stream = stream_result.stream;
     let mut output = String::new();
     let mut reasoning_output = String::new();
-    let timeout = tokio::time::sleep(Duration::from_millis(settings.timeout_ms));
-    tokio::pin!(timeout);
+    let idle_duration = Duration::from_millis(settings.timeout_ms);
+    let idle_deadline = tokio::time::sleep(idle_duration);
+    tokio::pin!(idle_deadline);
 
     loop {
         tokio::select! {
-            _ = &mut timeout => {
-                return Err(AppError::Config("AI stream timed out".to_string()));
+            _ = &mut idle_deadline => {
+                return Err(AppError::Config("AI stream timed out (no data received)".to_string()));
             }
             _ = &mut *cancel_rx => {
                 return Err(AppError::Cancelled("AI stream cancelled".to_string()));
             }
             item = stream.next() => {
+                idle_deadline.as_mut().reset(tokio::time::Instant::now() + idle_duration);
                 match item {
                     Some(Ok(ChatStreamEvent::Chunk(chunk))) => {
                         let text_delta = chunk.content;
@@ -625,31 +665,158 @@ async fn run_model_stream(
     })
 }
 
-fn active_profile(settings: &AiSettings) -> AppResult<&AiProviderProfile> {
-    settings
-        .provider_profiles
-        .iter()
-        .find(|profile| profile.id == settings.active_profile_id && profile.enabled)
-        .or_else(|| {
-            settings
-                .provider_profiles
-                .iter()
-                .find(|profile| profile.enabled)
-        })
-        .ok_or_else(|| AppError::Config("No enabled AI provider profile configured".to_string()))
+#[derive(Debug, Clone)]
+struct ResolvedAiModel {
+    model_name: String,
+    provider_kind: AiProviderKind,
+    credential: Option<AiProviderCredential>,
 }
 
-fn build_client(profile: &AiProviderProfile) -> AppResult<Client> {
-    let adapter_kind = adapter_kind(&profile.provider_kind);
-    let model = profile.model.clone();
-    let mapped_model = model.clone();
-    let api_key = profile
-        .api_key
+fn resolve_request_model(
+    settings: &AiSettings,
+    request: &AiChatRequest,
+) -> AppResult<ResolvedAiModel> {
+    let selected_model = request
+        .model_id
+        .as_deref()
+        .and_then(|id| {
+            settings
+                .models
+                .iter()
+                .find(|model| model.enabled && model.id == id)
+        })
+        .or_else(|| {
+            settings.default_model_id.as_deref().and_then(|id| {
+                settings
+                    .models
+                    .iter()
+                    .find(|model| model.enabled && model.id == id)
+            })
+        })
+        .or_else(|| settings.models.iter().find(|model| model.enabled))
+        .ok_or_else(|| AppError::Config("No enabled AI model configured".to_string()))?;
+
+    let model_provider_kind = selected_model
+        .provider_kind
         .clone()
+        .or_else(|| infer_provider_kind_from_model_id(&selected_model.id));
+
+    let credential =
+        resolve_model_credential(settings, selected_model, model_provider_kind.as_ref())?;
+    let provider_kind = credential
+        .as_ref()
+        .map(|credential| credential.provider_kind.clone())
+        .or(model_provider_kind)
+        .ok_or_else(|| {
+            AppError::Config(format!(
+                "AI model '{}' is missing provider information",
+                selected_model.name
+            ))
+        })?;
+    validate_model_credential(&provider_kind, credential.as_ref())?;
+
+    Ok(ResolvedAiModel {
+        model_name: selected_model.name.clone(),
+        provider_kind,
+        credential,
+    })
+}
+
+fn infer_provider_kind_from_model_id(model_id: &str) -> Option<AiProviderKind> {
+    let (prefix, _) = model_id.split_once(':')?;
+    match prefix {
+        "openai" => Some(AiProviderKind::Openai),
+        "anthropic" => Some(AiProviderKind::Anthropic),
+        "gemini" => Some(AiProviderKind::Gemini),
+        "deepseek" => Some(AiProviderKind::Deepseek),
+        "groq" => Some(AiProviderKind::Groq),
+        "ollama" => Some(AiProviderKind::Ollama),
+        "xai" => Some(AiProviderKind::Xai),
+        "cohere" => Some(AiProviderKind::Cohere),
+        "mimo" => Some(AiProviderKind::Mimo),
+        "zai" => Some(AiProviderKind::Zai),
+        "openai_compatible" => Some(AiProviderKind::OpenaiCompatible),
+        _ => None,
+    }
+}
+
+fn resolve_model_credential(
+    settings: &AiSettings,
+    model: &AiModelConfigItem,
+    provider_kind: Option<&AiProviderKind>,
+) -> AppResult<Option<AiProviderCredential>> {
+    if let Some(credential_id) = model.credential_id.as_deref() {
+        let credential = settings
+            .provider_credentials
+            .iter()
+            .find(|item| item.id == credential_id && item.enabled)
+            .cloned()
+            .ok_or_else(|| {
+                AppError::Config(format!(
+                    "No enabled AI credential found for model '{}'",
+                    model.name
+                ))
+            })?;
+        return Ok(Some(credential));
+    }
+
+    Ok(provider_kind.and_then(|provider_kind| {
+        settings
+            .provider_credentials
+            .iter()
+            .find(|item| item.enabled && &item.provider_kind == provider_kind)
+            .cloned()
+    }))
+}
+
+fn validate_model_credential(
+    provider_kind: &AiProviderKind,
+    credential: Option<&AiProviderCredential>,
+) -> AppResult<()> {
+    match provider_kind {
+        AiProviderKind::Ollama => Ok(()),
+        AiProviderKind::OpenaiCompatible => {
+            if credential.is_none() {
+                return Err(AppError::Config(
+                    "No enabled OpenAI-compatible AI credential configured".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        _ => {
+            let credential = credential.ok_or_else(|| {
+                AppError::Config(format!(
+                    "No enabled AI credential configured for {:?}",
+                    provider_kind
+                ))
+            })?;
+            if credential
+                .api_key
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                return Err(AppError::Config(format!(
+                    "No API key configured for AI credential '{}'",
+                    credential.name
+                )));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn build_client(model: &ResolvedAiModel) -> AppResult<Client> {
+    let adapter_kind = adapter_kind(&model.provider_kind);
+    let mapped_model = model.model_name.clone();
+    let api_key = model
+        .credential
+        .as_ref()
+        .and_then(|credential| credential.api_key.clone())
         .filter(|value| !value.trim().is_empty());
-    let base_url = profile
-        .base_url
-        .clone()
+    let base_url = model
+        .credential
+        .as_ref()
+        .and_then(|credential| credential.base_url.clone())
         .filter(|value| !value.trim().is_empty());
 
     let resolver =
@@ -678,7 +845,121 @@ fn adapter_kind(kind: &AiProviderKind) -> AdapterKind {
         AiProviderKind::Deepseek => AdapterKind::DeepSeek,
         AiProviderKind::Groq => AdapterKind::Groq,
         AiProviderKind::Ollama => AdapterKind::Ollama,
+        AiProviderKind::Xai
+        | AiProviderKind::Cohere
+        | AiProviderKind::Mimo
+        | AiProviderKind::Zai => AdapterKind::OpenAI,
     }
+}
+
+pub async fn list_model_names(app: &AppHandle) -> AppResult<Vec<AiModelDiscovery>> {
+    let settings = config::load_app_settings(app)?;
+
+    let custom_credentials: Vec<_> = settings
+        .ai
+        .provider_credentials
+        .iter()
+        .filter(|c| c.enabled && c.provider_kind == AiProviderKind::OpenaiCompatible)
+        .collect();
+
+    let mut models = BTreeMap::new();
+    let mut errors = Vec::new();
+
+    for credential in &custom_credentials {
+        let base_url = credential
+            .base_url
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
+        if base_url.is_empty() {
+            continue;
+        }
+        let api_key = credential
+            .api_key
+            .clone()
+            .filter(|v| !v.trim().is_empty());
+        let label = credential.name.as_str();
+        tracing::info!(credential = label, url = base_url, "Fetching model list from custom provider");
+        match fetch_openai_compatible_models(&base_url, api_key.as_deref()).await {
+            Ok(names) => {
+                tracing::info!(
+                    credential = label,
+                    count = names.len(),
+                    models = ?names,
+                    "Fetched models from custom provider"
+                );
+                for name in names {
+                    let trimmed = name.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let id = ai_model_id_for_credential(&credential.id, trimmed);
+                    models.entry(id.clone()).or_insert(AiModelDiscovery {
+                        id,
+                        name: trimmed.to_string(),
+                        provider_kind: Some(AiProviderKind::OpenaiCompatible),
+                        credential_id: Some(credential.id.clone()),
+                        source: AiModelSource::RustGenai,
+                    });
+                }
+            }
+            Err(error) => {
+                tracing::warn!(credential = label, %error, "Failed to fetch models from custom provider");
+                errors.push(format!("{label}: {error}"));
+            }
+        }
+    }
+
+    if models.is_empty() && !errors.is_empty() {
+        return Err(AppError::Config(format!(
+            "Failed to list AI models: {}",
+            errors.join("; ")
+        )));
+    }
+
+    Ok(models.into_values().collect())
+}
+
+/// Fetches model names from an OpenAI-compatible `/v1/models` endpoint directly via HTTP,
+/// bypassing `genai::Client::all_model_names` which does not apply the `ServiceTargetResolver`
+/// (and therefore ignores custom auth/endpoint configuration).
+async fn fetch_openai_compatible_models(
+    base_url: &str,
+    api_key: Option<&str>,
+) -> AppResult<Vec<String>> {
+    let url = format!("{base_url}/models");
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(key) = api_key {
+        req = req.bearer_auth(key);
+    }
+    let resp = req
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| AppError::Config(format!("Failed to fetch models from {url}: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Config(format!(
+            "Failed to fetch models from {url}: {status} {body}"
+        )));
+    }
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Config(format!("Invalid JSON from {url}: {e}")))?;
+    let names: Vec<String> = body["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item["id"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(names)
 }
 
 const SYSTEM_PROMPT: &str = r#"你是一个专业、谨慎、安全优先的 Linux / DevOps / 云原生终端助手。
@@ -718,6 +999,8 @@ fn build_prompt(request: &AiChatRequest, settings: &AiSettings) -> String {
         AiAction::ExplainSelected => "解释用户选中的终端文本并给出下一步建议",
         AiAction::AnalyzeError => "分析终端错误输出并给出排查步骤",
         AiAction::RepairFromSelection => "根据选中内容生成修复或排查命令",
+        AiAction::CustomTerminalAction => "根据用户配置的终端 AI 功能处理选中内容",
+        AiAction::CustomFileAction => "根据用户配置的文件 AI 功能处理文件内容",
     };
     let ctx = &request.context;
     format!(

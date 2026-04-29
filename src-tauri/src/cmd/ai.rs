@@ -13,6 +13,11 @@ pub fn start_ai_chat_stream(
 }
 
 #[tauri::command]
+pub async fn list_ai_model_names(app: tauri::AppHandle) -> AppResult<Vec<ai::AiModelDiscovery>> {
+    ai::list_model_names(&app).await
+}
+
+#[tauri::command]
 pub fn cancel_ai_chat_stream(stream_id: String) -> AppResult<()> {
     ai::cancel_chat_stream(stream_id)
 }
