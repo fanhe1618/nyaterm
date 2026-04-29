@@ -186,12 +186,37 @@ type MarkdownNodeProps = {
 
 function looksLikeStructuredJsonOutput(content: string) {
   const trimmed = content.trimStart();
-  return (
-    trimmed.startsWith("{") ||
-    trimmed.startsWith("```json") ||
-    trimmed.startsWith("```") ||
-    (trimmed.includes('"text"') && trimmed.includes('"commandCards"'))
-  );
+  if (trimmed.includes('"text"') && trimmed.includes('"commandCards"')) return true;
+  const jsonBody = trimmed.startsWith("```json")
+    ? trimmed.slice(trimmed.indexOf("\n") + 1).trimStart()
+    : trimmed;
+  return jsonBody.startsWith("{") && !jsonBody.startsWith("{{");
+}
+
+function extractThinkContent(content: string): { visible: string; reasoning: string | null } {
+  const closedRegex = /<think>([\s\S]*?)<\/think>/gi;
+  const reasoningParts: string[] = [];
+
+  for (const match of content.matchAll(closedRegex)) {
+    const part = match[1]?.trim();
+    if (part) reasoningParts.push(part);
+  }
+
+  let visible = content.replace(closedRegex, "");
+
+  const openIdx = visible.lastIndexOf("<think>");
+  if (openIdx >= 0) {
+    const trailing = visible.slice(openIdx + 7).trim();
+    if (trailing) reasoningParts.push(trailing);
+    visible = visible.slice(0, openIdx);
+  }
+
+  visible = visible.replace(/<(?:t(?:h(?:i(?:n(?:k)?)?)?)?)?$/, "");
+
+  return {
+    visible: visible.trim(),
+    reasoning: reasoningParts.length > 0 ? reasoningParts.join("\n\n") : null,
+  };
 }
 
 interface QuotedText {
@@ -357,11 +382,15 @@ function MarkdownContent({ content }: { content: string }) {
 
 function AssistantReasoning({ message, loading }: { message: AIMessage; loading: boolean }) {
   const { t } = useTranslation();
-  const reasoningContent = message.reasoningContent?.trim();
+  const contentThink = useMemo(() => extractThinkContent(message.content), [message.content]);
+  const reasoningContent = message.reasoningContent?.trim() || contentThink.reasoning || undefined;
   const [open, setOpen] = useState(false);
 
+  const hasResponseContent = contentThink.visible.length > 0 || (message.reasoningContent && contentThink.visible.length > 0);
+  const stillThinking = loading && !hasResponseContent;
+
   if (!reasoningContent) {
-    return loading ? (
+    return stillThinking ? (
       <div className="mt-3 overflow-hidden rounded-md border border-primary/25 bg-primary/8 shadow-sm">
         <div className="px-3 py-2.5 text-[0.6875rem]">
           <AnimatedStatusText label={t("ai.thinking")} />
@@ -376,21 +405,21 @@ function AssistantReasoning({ message, loading }: { message: AIMessage; loading:
       open={open}
       onOpenChange={setOpen}
       className={`mt-3 rounded-md border bg-background/40 ${
-        loading ? "border-primary/25 bg-primary/6 shadow-sm" : "border-border/60"
+        stillThinking ? "border-primary/25 bg-primary/6 shadow-sm" : "border-border/60"
       }`}
     >
       <CollapsibleTrigger asChild>
         <button
           type="button"
           className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[0.6875rem] font-medium transition hover:text-foreground ${
-            loading ? "text-primary" : "text-muted-foreground"
+            stillThinking ? "text-primary" : "text-muted-foreground"
           }`}
         >
           <span className="flex min-w-0 items-center gap-2">
-            {loading ? (
+            {stillThinking ? (
               <AnimatedStatusText label={t("ai.thinking")} />
             ) : (
-              <span>{t("ai.reasoning")}</span>
+              <span>{t("ai.thoughtComplete")}</span>
             )}
           </span>
           <span className="flex items-center gap-1">
@@ -408,21 +437,89 @@ function AssistantReasoning({ message, loading }: { message: AIMessage; loading:
   );
 }
 
-function AssistantResponse({ message, loading }: { message: AIMessage; loading: boolean }) {
-  const { t } = useTranslation();
+interface ParsedStructuredOutput {
+  text: string;
+  commandCards: AICommandCard[];
+}
 
-  if (loading && looksLikeStructuredJsonOutput(message.content)) {
+function tryParseStructuredOutput(content: string): ParsedStructuredOutput | null {
+  const stripped = content
+    .trim()
+    .replace(/^```json\s*\n?/, "")
+    .replace(/^```\s*\n?/, "")
+    .replace(/```\s*$/, "")
+    .trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const obj = JSON.parse(stripped.slice(start, end + 1));
+    if (obj && typeof obj.text === "string" && obj.text.trim()) {
+      return {
+        text: obj.text,
+        commandCards: Array.isArray(obj.commandCards) ? obj.commandCards : [],
+      };
+    }
+  } catch { /* incomplete JSON */ }
+  return null;
+}
+
+function AssistantResponse({
+  message,
+  loading,
+  onEarlyParse,
+}: {
+  message: AIMessage;
+  loading: boolean;
+  onEarlyParse?: (parsed: ParsedStructuredOutput) => void;
+}) {
+  const { t } = useTranslation();
+  const contentThink = useMemo(() => extractThinkContent(message.content), [message.content]);
+  const displayContent = contentThink.reasoning ? contentThink.visible : message.content;
+  const [rawOpen, setRawOpen] = useState(false);
+  const earlyParsedRef = useRef(false);
+
+  if (loading && looksLikeStructuredJsonOutput(displayContent)) {
+    const parsed = tryParseStructuredOutput(displayContent);
+    if (parsed) {
+      if (!earlyParsedRef.current && onEarlyParse) {
+        earlyParsedRef.current = true;
+        queueMicrotask(() => onEarlyParse(parsed));
+      }
+      return <MarkdownContent content={parsed.text} />;
+    }
+
     return (
-      <div className="mt-3 overflow-hidden rounded-md border border-primary/20 bg-primary/6 shadow-sm">
-        <div className="px-3 py-2.5 text-[0.6875rem]">
-          <AnimatedStatusText label={t("ai.formattingResponse")} />
-        </div>
+      <Collapsible
+        open={rawOpen}
+        onOpenChange={setRawOpen}
+        className="mt-3 rounded-md border border-primary/25 bg-primary/6 shadow-sm"
+      >
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[0.6875rem] font-medium text-primary transition hover:text-foreground"
+          >
+            <AnimatedStatusText label={t("ai.formattingResponse")} />
+            <span className="flex items-center gap-1 text-primary">
+              {rawOpen ? t("ai.collapseReasoning") : t("ai.expandReasoning")}
+              {rawOpen ? <MdExpandLess className="text-sm" /> : <MdExpandMore className="text-sm" />}
+            </span>
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t border-border/60 px-3 py-3">
+            <pre className="max-h-48 overflow-auto font-mono text-[0.6875rem] leading-5 terminal-scroll whitespace-pre-wrap break-all text-muted-foreground">
+              {displayContent || message.content}
+            </pre>
+          </div>
+        </CollapsibleContent>
         <div className="h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent animate-pulse" />
-      </div>
+      </Collapsible>
     );
   }
 
-  return <MarkdownContent content={message.content} />;
+  return <MarkdownContent content={displayContent} />;
 }
 
 function AICommandCardView({
@@ -1704,6 +1801,15 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                           <AssistantResponse
                             message={message}
                             loading={loading && streamingAssistantId === message.id}
+                            onEarlyParse={(parsed) => {
+                              setMessages((prev) =>
+                                prev.map((m) =>
+                                  m.id === message.id
+                                    ? { ...m, content: parsed.text, commandCards: parsed.commandCards }
+                                    : m,
+                                ),
+                              );
+                            }}
                           />
                         ) : (
                           <div className="whitespace-pre-wrap break-words">{message.content}</div>
