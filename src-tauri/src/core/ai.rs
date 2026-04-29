@@ -8,7 +8,7 @@ use genai::{Client, ModelIden};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -92,6 +92,8 @@ pub struct AiRequestOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiChatRequest {
+    #[serde(default)]
+    pub stream_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
@@ -262,9 +264,24 @@ struct RiskPattern {
 }
 
 static ACTIVE_STREAMS: OnceLock<Mutex<HashMap<String, oneshot::Sender<()>>>> = OnceLock::new();
+const AI_HISTORY_MAX_SESSIONS: usize = 200;
+const AI_HISTORY_MAX_MESSAGES: usize = 2_000;
+const AI_AUDIT_MAX_LOGS: usize = 2_000;
 
 fn active_streams() -> &'static Mutex<HashMap<String, oneshot::Sender<()>>> {
     ACTIVE_STREAMS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cancel_all_chat_streams() {
+    let senders: Vec<oneshot::Sender<()>> = active_streams()
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, tx)| tx)
+        .collect();
+    for sender in senders {
+        let _ = sender.send(());
+    }
 }
 
 fn default_max_output_commands() -> u8 {
@@ -299,7 +316,11 @@ pub fn start_chat_stream(app: AppHandle, mut request: AiChatRequest) -> AppResul
         return Err(AppError::Config("AI assistant is disabled".to_string()));
     }
 
-    let stream_id = format!("ai-stream-{}", uuid());
+    let stream_id = request
+        .stream_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("ai-stream-{}", uuid()));
     let session_id = request
         .session_id
         .clone()
@@ -308,17 +329,27 @@ pub fn start_chat_stream(app: AppHandle, mut request: AiChatRequest) -> AppResul
     request.session_id = Some(session_id.clone());
 
     let (cancel_tx, cancel_rx) = oneshot::channel();
-    active_streams()
-        .lock()
-        .unwrap()
-        .insert(stream_id.clone(), cancel_tx);
+    {
+        let mut streams = active_streams().lock().unwrap();
+        if streams.contains_key(&stream_id) {
+            return Err(AppError::Config("AI stream is already active".to_string()));
+        }
+        streams.insert(stream_id.clone(), cancel_tx);
+    }
 
     let task_app = app.clone();
     let task_stream_id = stream_id.clone();
     let task_session_id = session_id.clone();
     tauri::async_runtime::spawn(async move {
-        run_chat_stream(task_app, task_stream_id, task_session_id, request, settings.ai, cancel_rx)
-            .await;
+        run_chat_stream(
+            task_app,
+            task_stream_id,
+            task_session_id,
+            request,
+            settings.ai,
+            cancel_rx,
+        )
+        .await;
     });
 
     Ok(AiStreamStart {
@@ -367,19 +398,34 @@ async fn run_chat_stream(
         let _ = save_user_message(&app, &session_id, &request);
     }
 
-    let result = run_model_stream(
-        &app,
-        &stream_id,
-        &request,
-        &settings,
-        &mut cancel_rx,
-    )
-    .await;
-
-    active_streams().lock().unwrap().remove(&stream_id);
+    let result = run_model_stream(&app, &stream_id, &request, &settings, &mut cancel_rx).await;
 
     match result {
         Ok(stream_result) => {
+            if active_streams()
+                .lock()
+                .unwrap()
+                .remove(&stream_id)
+                .is_none()
+            {
+                emit_stream_event(
+                    &app,
+                    &stream_id,
+                    AiStreamEventPayload {
+                        event_type: "error".to_string(),
+                        stream_id: stream_id.clone(),
+                        session_id: Some(session_id),
+                        text_delta: None,
+                        reasoning_delta: None,
+                        message: None,
+                        command_cards: vec![],
+                        usage: None,
+                        error: Some("AI stream cancelled".to_string()),
+                    },
+                );
+                return;
+            }
+
             let (text, reasoning_content, mut command_cards) =
                 parse_model_output(&stream_result.text, stream_result.reasoning_content);
             for card in &mut command_cards {
@@ -422,6 +468,7 @@ async fn run_chat_stream(
             );
         }
         Err(error) => {
+            active_streams().lock().unwrap().remove(&stream_id);
             emit_stream_event(
                 &app,
                 &stream_id,
@@ -583,7 +630,12 @@ fn active_profile(settings: &AiSettings) -> AppResult<&AiProviderProfile> {
         .provider_profiles
         .iter()
         .find(|profile| profile.id == settings.active_profile_id && profile.enabled)
-        .or_else(|| settings.provider_profiles.iter().find(|profile| profile.enabled))
+        .or_else(|| {
+            settings
+                .provider_profiles
+                .iter()
+                .find(|profile| profile.enabled)
+        })
         .ok_or_else(|| AppError::Config("No enabled AI provider profile configured".to_string()))
 }
 
@@ -591,11 +643,17 @@ fn build_client(profile: &AiProviderProfile) -> AppResult<Client> {
     let adapter_kind = adapter_kind(&profile.provider_kind);
     let model = profile.model.clone();
     let mapped_model = model.clone();
-    let api_key = profile.api_key.clone().filter(|value| !value.trim().is_empty());
-    let base_url = profile.base_url.clone().filter(|value| !value.trim().is_empty());
+    let api_key = profile
+        .api_key
+        .clone()
+        .filter(|value| !value.trim().is_empty());
+    let base_url = profile
+        .base_url
+        .clone()
+        .filter(|value| !value.trim().is_empty());
 
-    let resolver = ServiceTargetResolver::from_resolver_fn(
-        move |service_target: genai::ServiceTarget| {
+    let resolver =
+        ServiceTargetResolver::from_resolver_fn(move |service_target: genai::ServiceTarget| {
             let mut service_target = service_target;
             if let Some(api_key) = api_key.clone() {
                 service_target.auth = AuthData::from_single(api_key);
@@ -604,8 +662,7 @@ fn build_client(profile: &AiProviderProfile) -> AppResult<Client> {
                 service_target.endpoint = Endpoint::from_owned(base_url);
             }
             Ok(service_target)
-        },
-    );
+        });
 
     Ok(Client::builder()
         .with_model_mapper_fn(move |_model| Ok(ModelIden::new(adapter_kind, mapped_model.clone())))
@@ -748,11 +805,7 @@ fn parse_model_output(
         Err(_) => {
             let normalized_reasoning = trim_optional_to_option(stream_reasoning);
             let (text, extracted_reasoning) = extract_think_block(raw_text);
-            (
-                text,
-                extracted_reasoning.or(normalized_reasoning),
-                vec![],
-            )
+            (text, extracted_reasoning.or(normalized_reasoning), vec![])
         }
     }
 }
@@ -843,8 +896,10 @@ fn redaction_patterns() -> &'static [(Regex, &'static str)] {
                 "$1=[REDACTED]",
             ),
             (
-                Regex::new(r"(?i)(token|api[_-]?key|secret[_-]?key|access[_-]?key)\s*[:=]\s*[^\s;&|]+")
-                    .unwrap(),
+                Regex::new(
+                    r"(?i)(token|api[_-]?key|secret[_-]?key|access[_-]?key)\s*[:=]\s*[^\s;&|]+",
+                )
+                .unwrap(),
                 "$1=[REDACTED]",
             ),
             (
@@ -1045,8 +1100,7 @@ fn is_read_only_command(lower: &str) -> bool {
     };
     matches!(
         first,
-        "ls"
-            | "pwd"
+        "ls" | "pwd"
             | "cat"
             | "tail"
             | "head"
@@ -1100,20 +1154,43 @@ fn bump_risk(level: &RiskLevel) -> RiskLevel {
     }
 }
 
-fn history_path(app: &AppHandle) -> AppResult<std::path::PathBuf> {
-    Ok(config::get_config_dir(app)?.join("ai-history.json"))
+fn load_history(_app: &AppHandle) -> AppResult<AiHistoryFile> {
+    crate::storage::load_json_doc(crate::storage::JSON_AI_HISTORY)
 }
 
-fn audit_path(app: &AppHandle) -> AppResult<std::path::PathBuf> {
-    Ok(config::get_config_dir(app)?.join("ai-audit.json"))
-}
+fn trim_history(history: &mut AiHistoryFile) {
+    history
+        .sessions
+        .sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    if history.sessions.len() > AI_HISTORY_MAX_SESSIONS {
+        history.sessions.truncate(AI_HISTORY_MAX_SESSIONS);
+    }
 
-fn load_history(app: &AppHandle) -> AppResult<AiHistoryFile> {
-    config::load_json(&history_path(app)?)
-}
+    let retained_sessions: HashSet<&str> = history
+        .sessions
+        .iter()
+        .map(|session| session.id.as_str())
+        .collect();
+    history
+        .messages
+        .retain(|message| retained_sessions.contains(message.session_id.as_str()));
 
-fn save_history(app: &AppHandle, history: &AiHistoryFile) -> AppResult<()> {
-    config::save_json(&history_path(app)?, history)
+    if history.messages.len() > AI_HISTORY_MAX_MESSAGES {
+        history
+            .messages
+            .sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        let remove_count = history.messages.len() - AI_HISTORY_MAX_MESSAGES;
+        history.messages.drain(0..remove_count);
+    }
+
+    let sessions_with_messages: HashSet<&str> = history
+        .messages
+        .iter()
+        .map(|message| message.session_id.as_str())
+        .collect();
+    history
+        .sessions
+        .retain(|session| sessions_with_messages.contains(session.id.as_str()));
 }
 
 fn save_user_message(app: &AppHandle, session_id: &str, request: &AiChatRequest) -> AppResult<()> {
@@ -1125,45 +1202,65 @@ fn save_user_message(app: &AppHandle, session_id: &str, request: &AiChatRequest)
         .collect::<String>()
         .trim()
         .to_string();
-    let mut history = load_history(app)?;
-    if let Some(session) = history.sessions.iter_mut().find(|item| item.id == session_id) {
-        session.updated_at = now.clone();
-    } else {
-        history.sessions.push(AiSession {
-            id: session_id.to_string(),
-            connection_id: request.connection_id.clone(),
-            title: if title.is_empty() {
-                "AI Session".to_string()
+    let connection_id = request.connection_id.clone();
+    let user_input = request.user_input.clone();
+    let session_id = session_id.to_string();
+
+    let _ = app;
+    crate::storage::update_json_doc::<AiHistoryFile, _, _>(
+        crate::storage::JSON_AI_HISTORY,
+        |history| {
+            if let Some(session) = history
+                .sessions
+                .iter_mut()
+                .find(|item| item.id == session_id)
+            {
+                session.updated_at = now.clone();
             } else {
-                title
-            },
-            created_at: now.clone(),
-            updated_at: now.clone(),
-        });
-    }
-    history.messages.push(AiMessage {
-        id: format!("msg-{}", uuid()),
-        session_id: session_id.to_string(),
-        role: AiMessageRole::User,
-        content: request.user_input.clone(),
-        created_at: now,
-        reasoning_content: None,
-        command_cards: vec![],
-    });
-    save_history(app, &history)
+                history.sessions.push(AiSession {
+                    id: session_id.clone(),
+                    connection_id,
+                    title: if title.is_empty() {
+                        "AI Session".to_string()
+                    } else {
+                        title
+                    },
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                });
+            }
+            history.messages.push(AiMessage {
+                id: format!("msg-{}", uuid()),
+                session_id,
+                role: AiMessageRole::User,
+                content: user_input,
+                created_at: now,
+                reasoning_content: None,
+                command_cards: vec![],
+            });
+            trim_history(history);
+            Ok(())
+        },
+    )
 }
 
 fn append_message(app: &AppHandle, message: AiMessage) -> AppResult<()> {
-    let mut history = load_history(app)?;
-    if let Some(session) = history
-        .sessions
-        .iter_mut()
-        .find(|item| item.id == message.session_id)
-    {
-        session.updated_at = message.created_at.clone();
-    }
-    history.messages.push(message);
-    save_history(app, &history)
+    let _ = app;
+    crate::storage::update_json_doc::<AiHistoryFile, _, _>(
+        crate::storage::JSON_AI_HISTORY,
+        |history| {
+            if let Some(session) = history
+                .sessions
+                .iter_mut()
+                .find(|item| item.id == message.session_id)
+            {
+                session.updated_at = message.created_at.clone();
+            }
+            history.messages.push(message);
+            trim_history(history);
+            Ok(())
+        },
+    )
 }
 
 pub fn get_ai_sessions(app: &AppHandle) -> AppResult<Vec<AiSession>> {
@@ -1181,11 +1278,13 @@ pub fn get_ai_messages(app: &AppHandle, session_id: String) -> AppResult<Vec<AiM
 }
 
 pub fn clear_ai_history(app: &AppHandle) -> AppResult<()> {
-    save_history(app, &AiHistoryFile::default())
+    let _ = app;
+    cancel_all_chat_streams();
+    crate::storage::save_json_doc(crate::storage::JSON_AI_HISTORY, &AiHistoryFile::default())
 }
 
 pub fn append_ai_audit(app: &AppHandle, request: AppendAiAuditRequest) -> AppResult<AiAuditLog> {
-    let mut file: AiAuditFile = config::load_json(&audit_path(app)?)?;
+    let _ = app;
     let log = AiAuditLog {
         id: format!("audit-{}", uuid()),
         connection_id: request.connection_id,
@@ -1198,17 +1297,20 @@ pub fn append_ai_audit(app: &AppHandle, request: AppendAiAuditRequest) -> AppRes
         blocked: request.blocked,
         created_at: now_rfc3339(),
     };
-    file.logs.push(log.clone());
-    if file.logs.len() > 2_000 {
-        let keep_from = file.logs.len().saturating_sub(2_000);
-        file.logs = file.logs.split_off(keep_from);
-    }
-    config::save_json(&audit_path(app)?, &file)?;
-    Ok(log)
+    crate::storage::update_json_doc::<AiAuditFile, _, _>(crate::storage::JSON_AI_AUDIT, |file| {
+        file.logs.push(log.clone());
+        if file.logs.len() > AI_AUDIT_MAX_LOGS {
+            let keep_from = file.logs.len().saturating_sub(AI_AUDIT_MAX_LOGS);
+            file.logs = file.logs.split_off(keep_from);
+        }
+        Ok(log)
+    })
 }
 
 pub fn get_ai_audit_logs(app: &AppHandle, limit: Option<usize>) -> AppResult<Vec<AiAuditLog>> {
-    let mut logs: Vec<AiAuditLog> = config::load_json::<AiAuditFile>(&audit_path(app)?)?.logs;
+    let _ = app;
+    let mut logs =
+        crate::storage::load_json_doc::<AiAuditFile>(crate::storage::JSON_AI_AUDIT)?.logs;
     logs.sort_by(|left, right| right.created_at.cmp(&left.created_at));
     if let Some(limit) = limit {
         logs.truncate(limit);
@@ -1245,6 +1347,18 @@ mod tests {
         });
         assert_eq!(result.risk_level, RiskLevel::Critical);
         assert!(result.blocked);
+    }
+
+    #[test]
+    fn detects_recursive_root_permission_changes_as_critical() {
+        for command in ["chmod -R 777 /", "chown -R deploy /"] {
+            let result = check_command_risk(CommandRiskRequest {
+                command: command.to_string(),
+                context: AiContext::default(),
+            });
+            assert_eq!(result.risk_level, RiskLevel::Critical);
+            assert!(result.blocked);
+        }
     }
 
     #[test]
@@ -1335,5 +1449,61 @@ mod tests {
         let history: AiHistoryFile = serde_json::from_str(raw).unwrap();
         assert_eq!(history.messages.len(), 1);
         assert_eq!(history.messages[0].reasoning_content, None);
+    }
+
+    #[test]
+    fn trims_ai_history_to_session_and_message_limits() {
+        let mut history = AiHistoryFile::default();
+        for session_idx in 0..220 {
+            let session_id = format!("s-{session_idx:03}");
+            let updated_at = format!(
+                "2026-04-28T00:{:02}:{:02}Z",
+                session_idx / 60,
+                session_idx % 60
+            );
+            history.sessions.push(AiSession {
+                id: session_id.clone(),
+                connection_id: None,
+                title: session_id.clone(),
+                created_at: updated_at.clone(),
+                updated_at,
+            });
+            for message_idx in 0..10 {
+                history.messages.push(AiMessage {
+                    id: format!("m-{session_idx:03}-{message_idx:02}"),
+                    session_id: session_id.clone(),
+                    role: if message_idx % 2 == 0 {
+                        AiMessageRole::User
+                    } else {
+                        AiMessageRole::Assistant
+                    },
+                    content: "message".to_string(),
+                    created_at: format!(
+                        "2026-04-28T00:{:02}:{:02}.{:03}Z",
+                        session_idx / 60,
+                        session_idx % 60,
+                        message_idx
+                    ),
+                    reasoning_content: None,
+                    command_cards: vec![],
+                });
+            }
+        }
+
+        trim_history(&mut history);
+
+        assert_eq!(history.sessions.len(), AI_HISTORY_MAX_SESSIONS);
+        assert_eq!(history.messages.len(), AI_HISTORY_MAX_MESSAGES);
+        let retained_sessions: HashSet<&str> = history
+            .sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect();
+        assert!(!retained_sessions.contains("s-000"));
+        assert!(retained_sessions.contains("s-219"));
+        assert!(history
+            .messages
+            .iter()
+            .all(|message| retained_sessions.contains(message.session_id.as_str())));
     }
 }
