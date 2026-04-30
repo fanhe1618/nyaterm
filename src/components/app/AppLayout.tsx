@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type { ComponentProps, ReactNode } from "react";
 import { MdClose, MdTerminal } from "react-icons/md";
 import AboutDialog from "@/components/dialog/app/AboutDialog";
+import { isMacOS } from "@/lib/platform";
 import LockScreen from "@/components/dialog/app/LockScreen";
 import QuitConfirmDialog from "@/components/dialog/app/QuitConfirmDialog";
 import UpdateDialog from "@/components/dialog/app/UpdateDialog";
@@ -102,7 +103,7 @@ export default function AppLayout({
       />
 
       <main className="flex-1 flex overflow-hidden relative">
-        {(mobile.leftOpen || mobile.rightOpen) && (
+        {!isMacOS && (mobile.leftOpen || mobile.rightOpen) && (
           <div
             className="absolute inset-0 bg-black/50 z-40 lg:hidden"
             onClick={() => {
@@ -122,27 +123,33 @@ export default function AppLayout({
           <>
             <div
               style={{ width: uiConfig.left_width, backgroundColor: "var(--df-bg-panel)" }}
-              className={`
-                fixed inset-y-0 left-10 z-40 flex flex-col shadow-xl transition-transform duration-200
-                lg:relative lg:left-0 lg:translate-x-0 lg:z-0 lg:shadow-none
-                ${
-                  mobile.leftOpen
-                    ? "translate-x-0"
-                    : "-translate-x-[calc(100%+2.5rem)] lg:translate-x-0"
-                }
-              `}
+              className={
+                isMacOS
+                  ? "relative flex flex-col"
+                  : `
+                    fixed inset-y-0 left-10 z-40 flex flex-col shadow-xl transition-transform duration-200
+                    lg:relative lg:left-0 lg:translate-x-0 lg:z-0 lg:shadow-none
+                    ${
+                      mobile.leftOpen
+                        ? "translate-x-0"
+                        : "-translate-x-[calc(100%+2.5rem)] lg:translate-x-0"
+                    }
+                  `
+              }
             >
-              <div
-                className="lg:hidden h-10 flex items-center justify-end px-2 border-b shrink-0"
-                style={{ borderColor: "var(--df-border)" }}
-              >
-                <button
-                  onClick={() => mobile.setLeftOpen(false)}
-                  style={{ color: "var(--df-text-muted)" }}
+              {!isMacOS && (
+                <div
+                  className="lg:hidden h-10 flex items-center justify-end px-2 border-b shrink-0"
+                  style={{ borderColor: "var(--df-border)" }}
                 >
-                  <MdClose />
-                </button>
-              </div>
+                  <button
+                    onClick={() => mobile.setLeftOpen(false)}
+                    style={{ color: "var(--df-text-muted)" }}
+                  >
+                    <MdClose />
+                  </button>
+                </div>
+              )}
 
               <div className="flex-1 min-h-0 overflow-hidden">
                 {panelContent(uiConfig.active_left_panel)}
@@ -151,7 +158,7 @@ export default function AppLayout({
             <ResizeHandle
               direction="horizontal"
               onResize={onLeftResize}
-              className="hidden lg:block"
+              className={isMacOS ? "" : "hidden lg:block"}
             />
           </>
         )}
@@ -224,7 +231,7 @@ export default function AppLayout({
             <ResizeHandle
               direction="horizontal"
               onResize={onRightResize}
-              className="hidden md:block"
+              className={isMacOS ? "" : "hidden md:block"}
             />
             <aside
               style={{
@@ -232,27 +239,33 @@ export default function AppLayout({
                 backgroundColor: "var(--df-bg-panel)",
                 borderColor: "var(--df-border)",
               }}
-              className={`
-                fixed inset-y-0 right-10 z-50 flex flex-col shadow-xl transition-transform duration-200 border-l
-                md:relative md:right-0 md:translate-x-0 md:z-0 md:shadow-none
-                ${
-                  mobile.rightOpen
-                    ? "translate-x-0"
-                    : "translate-x-[calc(100%+2.5rem)] md:translate-x-0"
-                }
-              `}
+              className={
+                isMacOS
+                  ? "relative flex flex-col border-l"
+                  : `
+                    fixed inset-y-0 right-10 z-50 flex flex-col shadow-xl transition-transform duration-200 border-l
+                    md:relative md:right-0 md:translate-x-0 md:z-0 md:shadow-none
+                    ${
+                      mobile.rightOpen
+                        ? "translate-x-0"
+                        : "translate-x-[calc(100%+2.5rem)] md:translate-x-0"
+                    }
+                  `
+              }
             >
-              <div
-                className="md:hidden h-10 flex items-center justify-end px-2 border-b shrink-0"
-                style={{ borderColor: "var(--df-border)" }}
-              >
-                <button
-                  onClick={() => mobile.setRightOpen(false)}
-                  style={{ color: "var(--df-text-muted)" }}
+              {!isMacOS && (
+                <div
+                  className="md:hidden h-10 flex items-center justify-end px-2 border-b shrink-0"
+                  style={{ borderColor: "var(--df-border)" }}
                 >
-                  <MdClose />
-                </button>
-              </div>
+                  <button
+                    onClick={() => mobile.setRightOpen(false)}
+                    style={{ color: "var(--df-text-muted)" }}
+                  >
+                    <MdClose />
+                  </button>
+                </div>
+              )}
 
               <div className="flex-1 min-h-0 overflow-hidden">
                 {panelContent(uiConfig.active_right_panel)}
