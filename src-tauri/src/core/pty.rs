@@ -7,12 +7,13 @@ use super::session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
 use super::update_cwd_if_changed;
+use crate::core::capture::OutputCaptureProcessor;
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
 use crate::core::SessionOutputCoalescer;
 use crate::error::AppResult;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
@@ -193,6 +194,9 @@ fn pty_session_thread(
     let output_event = format!("terminal-output-{}", session_id);
     let output = SessionOutputCoalescer::for_app(app.clone(), output_event.clone());
 
+    let capture_processor = Arc::new(StdMutex::new(OutputCaptureProcessor::new()));
+    let capture_for_reader = capture_processor.clone();
+
     let app_read = app.clone();
     let sid_read = session_id.clone();
     let cwd_event = format!("cwd-changed-{}", session_id);
@@ -213,7 +217,7 @@ fn pty_session_thread(
                 Ok(0) => break,
                 Ok(n) => {
                     let text = String::from_utf8_lossy(&raw_buf[..n]).to_string();
-                    let result = stripper.push(&text);
+                    let mut result = stripper.push(&text);
 
                     for path in &result.cwd_paths {
                         let cwd_ev = cwd_event.clone();
@@ -237,6 +241,12 @@ fn pty_session_thread(
                             suppress_visible = false;
                         }
                         continue;
+                    }
+
+                    if let Ok(mut proc) = capture_for_reader.lock() {
+                        if proc.has_active() {
+                            result.visible = proc.process(&result.visible);
+                        }
                     }
 
                     if !result.visible.is_empty() {
@@ -286,6 +296,22 @@ fn pty_session_thread(
                         session_id = %session_id,
                         error = %error,
                         "Failed to write to local PTY"
+                    );
+                }
+            }
+            SessionCommand::CaptureExec {
+                marker_id,
+                wrapped_command,
+                result_tx,
+            } => {
+                if let Ok(mut proc) = capture_processor.lock() {
+                    proc.register(marker_id, result_tx);
+                }
+                if let Err(error) = write_to_pty(&mut *writer, &wrapped_command) {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %error,
+                        "Failed to write capture command to local PTY"
                     );
                 }
             }

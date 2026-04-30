@@ -3,6 +3,7 @@
 use super::session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
+use crate::core::capture::OutputCaptureProcessor;
 use crate::core::SessionOutputCoalescer;
 use crate::error::{AppError, AppResult};
 use crate::observability::{log_event, log_rate_limited, StructuredLog, StructuredLogLevel};
@@ -162,6 +163,9 @@ fn serial_session_thread(
     let closed_event = format!("session-closed-{}", session_id);
     let output = SessionOutputCoalescer::for_app(app.clone(), output_event.clone());
 
+    let capture_processor = Arc::new(Mutex::new(OutputCaptureProcessor::new()));
+    let capture_for_reader = capture_processor.clone();
+
     // Reader thread
     let app_reader = app.clone();
     let sid_reader = session_id.clone();
@@ -181,8 +185,15 @@ fn serial_session_thread(
             match result {
                 Ok(0) => break,
                 Ok(n) => {
-                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                    output_reader.push_owned(text);
+                    let mut text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if let Ok(mut proc) = capture_for_reader.lock() {
+                        if proc.has_active() {
+                            text = proc.process(&text);
+                        }
+                    }
+                    if !text.is_empty() {
+                        output_reader.push_owned(text);
+                    }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
                     continue;
@@ -221,6 +232,18 @@ fn serial_session_thread(
             SessionCommand::Write(data) => {
                 let mut p = port.lock().unwrap();
                 let _ = p.write_all(&data);
+                let _ = p.flush();
+            }
+            SessionCommand::CaptureExec {
+                marker_id,
+                wrapped_command,
+                result_tx,
+            } => {
+                if let Ok(mut proc) = capture_processor.lock() {
+                    proc.register(marker_id, result_tx);
+                }
+                let mut p = port.lock().unwrap();
+                let _ = p.write_all(&wrapped_command);
                 let _ = p.flush();
             }
             SessionCommand::Resize { .. } => {}

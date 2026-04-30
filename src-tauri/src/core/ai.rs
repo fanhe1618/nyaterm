@@ -2,8 +2,8 @@ use crate::config::{
     self, ai_model_id_for_credential, AiMode, AiModelConfigItem, AiModelSource,
     AiProviderCredential, AiProviderKind, AiSettings,
 };
-use crate::core::session::{SessionManager, SessionType};
-use crate::core::ssh::SshConnectionHandles;
+use crate::core::capture;
+use crate::core::session::{SessionCommand, SessionManager};
 use crate::error::{AppError, AppResult};
 use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
@@ -696,12 +696,14 @@ fn emit_agent_step(app: &AppHandle, stream_id: &str, payload: AgentStepPayload) 
     let _ = app.emit(format!("ai-stream-{stream_id}").as_str(), payload);
 }
 
-/// Execute a command out-of-band — never touches the interactive terminal.
+/// Execute a command via marker-based PTY capture.
 ///
-/// - **SSH**: opens a dedicated exec channel on the existing connection.
-/// - **Local**: spawns a child process via the system shell.
-/// - Other session types are not supported for agent mode.
+/// Injects the command directly into the interactive PTY session (wrapped with
+/// unique boundary markers), then captures the output from the PTY stream.
+/// This works regardless of the user's current context: nested SSH, containers,
+/// `sudo su`, etc.
 async fn execute_command_on_session(
+    app: &AppHandle,
     session_manager: &SessionManager,
     terminal_session_id: &str,
     command: &str,
@@ -711,220 +713,77 @@ async fn execute_command_on_session(
         terminal_session_id = %terminal_session_id,
         timeout_ms,
         command_preview = %safe_command_preview(command),
-        "Preparing to execute agent command"
+        "Preparing to execute agent command via PTY capture"
     );
-    let (session_type, ssh_handle, cwd) = {
-        let sessions = session_manager.sessions.lock().await;
-        let session = sessions.get(terminal_session_id).ok_or_else(|| {
-            AppError::SessionNotFound(format!("Session '{}' not found", terminal_session_id))
-        })?;
-        (
-            session.info.session_type.clone(),
-            session.ssh_handle.clone(),
-            session.cwd.clone(),
+
+    let marker_id = uuid::Uuid::new_v4().to_string();
+    let wrapped = capture::build_capture_command(&marker_id, command);
+    let (tx, rx) = oneshot::channel();
+
+    let capture_event = format!("ai-capture-{terminal_session_id}");
+    let _ = app.emit(&capture_event, "start");
+
+    session_manager
+        .send_command(
+            terminal_session_id,
+            SessionCommand::CaptureExec {
+                marker_id: marker_id.clone(),
+                wrapped_command: wrapped.into_bytes(),
+                result_tx: tx,
+            },
         )
-    };
-
-    let has_cwd = cwd.lock().await.is_some();
-    tracing::debug!(
-        terminal_session_id = %terminal_session_id,
-        session_type = ?session_type,
-        has_ssh_handle = ssh_handle.is_some(),
-        has_cwd,
-        "Resolved terminal session for agent command"
-    );
-
-    match session_type {
-        SessionType::SSH => exec_via_ssh_channel(ssh_handle, cwd, command, timeout_ms).await,
-        SessionType::Local => exec_via_subprocess(cwd, command, timeout_ms).await,
-        other => Err(AppError::Channel(format!(
-            "Agent mode is not supported for {:?} sessions",
-            other
-        ))),
-    }
-}
-
-/// SSH: open a separate exec channel so nothing appears in the interactive PTY.
-async fn exec_via_ssh_channel(
-    ssh_handle: Option<Arc<dyn std::any::Any + Send + Sync>>,
-    cwd: crate::core::SharedCwd,
-    command: &str,
-    timeout_ms: u64,
-) -> AppResult<CommandObservation> {
-    let handles = ssh_handle
-        .ok_or_else(|| AppError::Config("Not an SSH session".to_string()))?
-        .downcast::<SshConnectionHandles>()
-        .map_err(|_| AppError::Config("Failed to downcast SSH handle".to_string()))?;
-    let handle_mtx = handles.target_handle();
-
-    let mut channel = {
-        let handle = handle_mtx.lock().await;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|e| AppError::Channel(format!("Failed to open exec channel: {e}")))?
-    };
-
-    let full_cmd = match cwd.lock().await.as_deref() {
-        Some(dir) if !dir.is_empty() => format!("cd {} && {}", shell_quote(dir), command),
-        _ => command.to_string(),
-    };
-
-    tracing::debug!(
-        timeout_ms,
-        has_cwd_prefix = full_cmd != command,
-        command_preview = %safe_command_preview(command),
-        "Executing agent command over SSH exec channel"
-    );
-
-    channel
-        .exec(true, full_cmd.as_bytes())
-        .await
-        .map_err(|e| AppError::Channel(format!("Failed to exec command: {e}")))?;
-
-    let start = std::time::Instant::now();
-    let timeout_dur = Duration::from_millis(timeout_ms);
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    let mut exit_code: Option<i32> = None;
-
-    loop {
-        let remaining = timeout_dur.saturating_sub(start.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        match tokio::time::timeout(remaining, channel.wait()).await {
-            Ok(Some(russh::ChannelMsg::Data { ref data })) => {
-                stdout.push_str(&String::from_utf8_lossy(data));
-            }
-            Ok(Some(russh::ChannelMsg::ExtendedData { ref data, .. })) => {
-                stderr.push_str(&String::from_utf8_lossy(data));
-            }
-            Ok(Some(russh::ChannelMsg::ExitStatus { exit_status })) => {
-                exit_code = Some(exit_status as i32);
-            }
-            Ok(Some(_)) => {}
-            Ok(None) => break,
-            Err(_) => break,
-        }
-    }
-
-    let output = if stderr.is_empty() {
-        stdout
-    } else if stdout.is_empty() {
-        stderr
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
-
-    let duration_ms = start.elapsed().as_millis() as u64;
-    tracing::debug!(
-        exit_code,
-        duration_ms,
-        output_len = output.len(),
-        "SSH agent command finished"
-    );
-
-    Ok(CommandObservation {
-        output,
-        exit_code,
-        duration_ms,
-    })
-}
-
-/// Local: spawn a child process so nothing appears in the interactive PTY.
-async fn exec_via_subprocess(
-    cwd: crate::core::SharedCwd,
-    command: &str,
-    timeout_ms: u64,
-) -> AppResult<CommandObservation> {
-    let working_dir = cwd.lock().await.clone();
-
-    tracing::debug!(
-        timeout_ms,
-        working_dir = ?working_dir,
-        command_preview = %safe_command_preview(command),
-        "Executing agent command via local subprocess"
-    );
-
-    let start = std::time::Instant::now();
-
-    let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = tokio::process::Command::new("cmd");
-        c.args(["/C", command]);
-        c
-    } else {
-        let mut c = tokio::process::Command::new("sh");
-        c.args(["-c", command]);
-        c
-    };
-
-    if let Some(ref dir) = working_dir {
-        cmd.current_dir(dir);
-    }
-
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    cmd.stdin(std::process::Stdio::null());
-
-    #[cfg(target_os = "windows")]
-    {
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    let child = cmd
-        .spawn()
-        .map_err(|e| AppError::Channel(format!("Failed to spawn subprocess: {e}")))?;
+        .await?;
 
     let timeout_dur = Duration::from_millis(timeout_ms);
-    match tokio::time::timeout(timeout_dur, child.wait_with_output()).await {
-        Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let combined = if stderr.is_empty() {
-                stdout
-            } else if stdout.is_empty() {
-                stderr
-            } else {
-                format!("{stdout}\n{stderr}")
-            };
-            let exit_code = output.status.code();
-            let duration_ms = start.elapsed().as_millis() as u64;
+    let result = match tokio::time::timeout(timeout_dur, rx).await {
+        Ok(Ok(captured)) => {
+            let output = strip_ansi_escapes(&captured.output);
             tracing::debug!(
-                exit_code,
-                duration_ms,
-                output_len = combined.len(),
-                "Local agent subprocess finished"
+                terminal_session_id = %terminal_session_id,
+                marker_id = %marker_id,
+                exit_code = ?captured.exit_code,
+                duration_ms = captured.duration_ms,
+                output_len = output.len(),
+                "PTY capture completed"
             );
             Ok(CommandObservation {
-                output: combined,
-                exit_code,
-                duration_ms,
+                output,
+                exit_code: captured.exit_code,
+                duration_ms: captured.duration_ms,
             })
         }
-        Ok(Err(e)) => {
-            tracing::warn!(error = %e, "Local agent subprocess failed");
-            Err(AppError::Channel(format!("Subprocess error: {e}")))
+        Ok(Err(_)) => {
+            tracing::warn!(
+                terminal_session_id = %terminal_session_id,
+                marker_id = %marker_id,
+                "PTY capture channel closed without result"
+            );
+            Err(AppError::Channel(
+                "Capture channel closed — session may have disconnected".to_string(),
+            ))
         }
         Err(_) => {
-            let duration_ms = start.elapsed().as_millis() as u64;
-            tracing::warn!(timeout_ms, duration_ms, "Local agent subprocess timed out");
+            tracing::warn!(
+                terminal_session_id = %terminal_session_id,
+                marker_id = %marker_id,
+                timeout_ms,
+                "PTY capture timed out"
+            );
             Ok(CommandObservation {
-                output: "(command timed out)".to_string(),
+                output: "(command timed out — markers not detected in PTY output)".to_string(),
                 exit_code: None,
-                duration_ms,
+                duration_ms: timeout_ms,
             })
         }
-    }
+    };
+
+    let _ = app.emit(&capture_event, "end");
+    result
 }
 
-/// Simple quoting to make a path safe for `cd`.
-fn shell_quote(s: &str) -> String {
-    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\') {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    } else {
-        s.to_string()
-    }
+/// Strip ANSI escape sequences from captured PTY output.
+fn strip_ansi_escapes(input: &str) -> String {
+    strip_ansi_escapes::strip_str(input)
 }
 
 fn is_cancelled(cancel_rx: &mut oneshot::Receiver<()>) -> bool {
@@ -1324,6 +1183,7 @@ async fn run_agent_stream(
                 emit_agent_step(&app, &stream_id, step);
 
                 let obs = match execute_command_on_session(
+                    &app,
                     &session_manager,
                     &terminal_session_id,
                     &command,

@@ -1,4 +1,5 @@
 use super::client::{SshHandle, SshHandler};
+use crate::core::capture::OutputCaptureProcessor;
 use crate::core::ssh::osc::{self, OscStripper, ShellKind};
 use crate::core::{
     update_cwd_if_changed, RecordingManager, SessionCommand, SessionManager,
@@ -151,6 +152,8 @@ pub(super) async fn ssh_io_loop(
     let output = SessionOutputCoalescer::for_app(app.clone(), output_event.clone());
     let mut stripper = OscStripper::new(&ready_marker);
 
+    let mut capture_processor = OutputCaptureProcessor::new();
+
     let mut phase = if injection_script.is_some() {
         IoPhase::WaitInitial
     } else {
@@ -181,6 +184,10 @@ pub(super) async fn ssh_io_loop(
                     Some(SessionCommand::Resize { cols, rows }) => {
                         let _ = channel.window_change(cols, rows, 0, 0).await;
                     }
+                    Some(SessionCommand::CaptureExec { marker_id, wrapped_command, result_tx }) => {
+                        capture_processor.register(marker_id, result_tx);
+                        let _ = channel.data(&wrapped_command[..]).await;
+                    }
                     Some(SessionCommand::Close) => {
                         let _ = channel.close().await;
                         break "local-close-request";
@@ -195,12 +202,14 @@ pub(super) async fn ssh_io_loop(
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
                         let text = String::from_utf8_lossy(data).to_string();
-                        let result = stripper.push(&text);
+                        let mut result = stripper.push(&text);
+
+                        if capture_processor.has_active() {
+                            result.visible = capture_processor.process(&result.visible);
+                        }
 
                         match phase {
                             IoPhase::WaitInitial => {
-                                // First output from the shell — emit it so the
-                                // user sees the banner / MOTD, then inject.
                                 emit_output(
                                     &app, &output, &cwd_event, &cwd,
                                     &recording_mgr, &session_id, &manager,
@@ -217,8 +226,6 @@ pub(super) async fn ssh_io_loop(
                                 );
                             }
                             IoPhase::Suppressing => {
-                                // Discard visible text (injection echo) but
-                                // still honour CWD changes and ready marker.
                                 for path in &result.cwd_paths {
                                     if let Some(next_cwd) = update_cwd_if_changed(&cwd, path).await {
                                         let _ = app.emit(&cwd_event, &next_cwd);

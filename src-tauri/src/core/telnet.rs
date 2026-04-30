@@ -3,6 +3,7 @@
 use super::session::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
+use crate::core::capture::OutputCaptureProcessor;
 use crate::core::SessionOutputCoalescer;
 use crate::error::AppResult;
 use crate::observability::{log_event, log_rate_limited, StructuredLog, StructuredLogLevel};
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 const IAC: u8 = 255;
 const WILL: u8 = 251;
@@ -206,12 +207,14 @@ async fn telnet_session_task(
     let closed_event = format!("session-closed-{}", session_id);
     let output = SessionOutputCoalescer::for_app(app.clone(), output_event.clone());
 
+    let capture_processor = Arc::new(TokioMutex::new(OutputCaptureProcessor::new()));
+    let capture_for_reader = capture_processor.clone();
+
     let app_reader = app.clone();
     let sid_reader = session_id.clone();
     let output_reader = output.clone();
     let reader_connection_id = connection_id.clone();
 
-    // Shared channel for negotiation responses from the reader to the writer
     let (negotiate_tx, mut negotiate_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let reader_handle = tokio::spawn(async move {
@@ -228,8 +231,15 @@ async fn telnet_session_task(
                         }
                     });
                     if !visible.is_empty() {
-                        let text = String::from_utf8_lossy(&visible).to_string();
-                        output_reader.push_owned(text);
+                        let mut text = String::from_utf8_lossy(&visible).to_string();
+                        let mut proc = capture_for_reader.lock().await;
+                        if proc.has_active() {
+                            text = proc.process(&text);
+                        }
+                        drop(proc);
+                        if !text.is_empty() {
+                            output_reader.push_owned(text);
+                        }
                     }
                 }
                 Err(e) => {
@@ -301,6 +311,16 @@ async fn telnet_session_task(
                                 client_timestamp: None,
                             });
                             break;
+                        }
+                    }
+                    Some(SessionCommand::CaptureExec { marker_id, wrapped_command, result_tx }) => {
+                        capture_processor.lock().await.register(marker_id, result_tx);
+                        if let Err(e) = writer.write_all(&wrapped_command).await {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %e,
+                                "Failed to write capture command to Telnet"
+                            );
                         }
                     }
                     Some(SessionCommand::Resize { cols, rows }) => {

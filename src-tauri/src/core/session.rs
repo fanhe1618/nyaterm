@@ -6,6 +6,7 @@
 use super::history::{sanitize_history_command, CommandHistoryStore};
 use crate::error::{AppError, AppResult};
 use crate::utils::fuzzy::{fuzzy_search_items, FuzzyResult};
+use crate::core::capture::CapturedOutput;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -13,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::Emitter;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 const HISTORY_SAVE_DEBOUNCE: Duration = Duration::from_millis(100);
 
@@ -89,6 +90,12 @@ pub enum SessionCommand {
     Resize { cols: u32, rows: u32 },
     /// Close the session and clean up.
     Close,
+    /// AI capture: inject a marker-wrapped command into the PTY and capture output.
+    CaptureExec {
+        marker_id: String,
+        wrapped_command: Vec<u8>,
+        result_tx: oneshot::Sender<CapturedOutput>,
+    },
 }
 
 /// Handle to an active session; used to send commands and access SSH config for SFTP.
