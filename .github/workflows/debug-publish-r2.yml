@@ -1,0 +1,329 @@
+name: Debug Publish Release Assets to R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "GitHub Release tag, e.g. v0.9.0"
+        required: true
+        type: string
+      dry_run:
+        description: "Only download and generate manifest, do not upload to R2"
+        required: true
+        default: true
+        type: boolean
+      overwrite_latest:
+        description: "Upload to /latest.json. Turn off if you only want to test versioned path."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debug-publish-r2-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET: nyaterm
+  DOWNLOAD_BASE_URL: https://downloads.nyaterm.app
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: us-east-1
+
+  # Avoid checksum compatibility issues with some S3-compatible services.
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  debug-publish-r2:
+    name: Debug publish ${{ inputs.tag }} to R2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Show config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Tag: ${{ inputs.tag }}"
+          echo "Dry run: ${{ inputs.dry_run }}"
+          echo "Overwrite latest.json: ${{ inputs.overwrite_latest }}"
+          echo "R2 bucket: ${R2_BUCKET}"
+          echo "Download base URL: ${DOWNLOAD_BASE_URL}"
+          echo "R2 endpoint: ${R2_ENDPOINT}"
+
+      - name: Check required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+
+          if [ -z "${{ secrets.R2_ACCOUNT_ID }}" ]; then
+            echo "::error::Missing secret: R2_ACCOUNT_ID"
+            missing=1
+          fi
+
+          if [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ]; then
+            echo "::error::Missing secret: R2_ACCESS_KEY_ID"
+            missing=1
+          fi
+
+          if [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::Missing secret: R2_SECRET_ACCESS_KEY"
+            missing=1
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Check R2 connection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws s3 ls "s3://${R2_BUCKET}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --no-paginate
+
+      - name: Download GitHub Release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+
+          rm -rf release-assets
+          mkdir -p release-assets
+
+          echo "Downloading GitHub Release assets for ${TAG}..."
+
+          gh release download "${TAG}" \
+            --dir release-assets \
+            --clobber
+
+          echo "Downloaded assets:"
+          find release-assets -maxdepth 1 -type f -printf "%f\n" | sort
+
+          if [ ! -f release-assets/latest.json ]; then
+            echo "::error::latest.json not found in GitHub Release ${TAG}"
+            exit 1
+          fi
+
+      - name: Build R2 latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const tag = process.env.TAG;
+          const baseUrl = (process.env.DOWNLOAD_BASE_URL || '').replace(/\/$/, '');
+
+          const inputPath = 'release-assets/latest.json';
+          const outputPath = 'release-assets/r2-latest.json';
+
+          const manifest = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+
+          if (!manifest.version) {
+            throw new Error('latest.json missing version');
+          }
+
+          if (!manifest.platforms || typeof manifest.platforms !== 'object') {
+            throw new Error('latest.json missing platforms');
+          }
+
+          for (const [platform, item] of Object.entries(manifest.platforms)) {
+            if (!item.url) {
+              throw new Error(`platforms.${platform}.url is missing`);
+            }
+
+            const oldUrl = new URL(item.url);
+            const filename = decodeURIComponent(oldUrl.pathname.split('/').pop());
+
+            const localFile = path.join('release-assets', filename);
+
+            if (!fs.existsSync(localFile)) {
+              throw new Error(`Installer referenced by latest.json not found locally: ${filename}`);
+            }
+
+            item.url = `${baseUrl}/releases/${tag}/${encodeURIComponent(filename)}`;
+          }
+
+          fs.writeFileSync(outputPath, JSON.stringify(manifest, null, 2) + '\n');
+
+          console.log(`Generated ${outputPath}`);
+          console.log(`Version: ${manifest.version}`);
+          console.log(`Platforms: ${Object.keys(manifest.platforms).join(', ')}`);
+          NODE
+        env:
+          TAG: ${{ inputs.tag }}
+          DOWNLOAD_BASE_URL: ${{ env.DOWNLOAD_BASE_URL }}
+
+      - name: Print R2 latest.json preview
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "===== release-assets/r2-latest.json ====="
+          cat release-assets/r2-latest.json
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+
+          echo "Dry run enabled. Nothing will be uploaded."
+          echo
+          echo "Would upload installers to:"
+          echo "s3://${R2_BUCKET}/releases/${TAG}/"
+          echo
+          echo "Would upload versioned manifest to:"
+          echo "s3://${R2_BUCKET}/releases/${TAG}/latest.json"
+
+          if [ "${{ inputs.overwrite_latest }}" = "true" ]; then
+            echo
+            echo "Would also upload latest manifest to:"
+            echo "s3://${R2_BUCKET}/latest.json"
+          fi
+
+      - name: Upload installers to R2
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          TAG="${{ inputs.tag }}"
+
+          for file_path in release-assets/*; do
+            file="$(basename "$file_path")"
+
+            case "$file" in
+              latest.json|r2-latest.json|*.sig)
+                continue
+                ;;
+            esac
+
+            content_type="application/octet-stream"
+
+            case "$file" in
+              *.dmg)
+                content_type="application/x-apple-diskimage"
+                ;;
+              *.exe)
+                content_type="application/vnd.microsoft.portable-executable"
+                ;;
+              *.AppImage)
+                content_type="application/octet-stream"
+                ;;
+              *.deb)
+                content_type="application/vnd.debian.binary-package"
+                ;;
+              *.rpm)
+                content_type="application/x-rpm"
+                ;;
+              *.tar.gz|*.gz)
+                content_type="application/gzip"
+                ;;
+              *.zip)
+                content_type="application/zip"
+                ;;
+            esac
+
+            echo "Uploading ${file}..."
+
+            aws s3 cp "$file_path" "s3://${R2_BUCKET}/releases/${TAG}/${file}" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --content-type "${content_type}" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --content-disposition "attachment; filename=\"${file}\"" \
+              --no-progress
+          done
+
+      - name: Upload versioned latest.json to R2
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+
+          aws s3 cp release-assets/r2-latest.json "s3://${R2_BUCKET}/releases/${TAG}/latest.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --no-progress
+
+      - name: Upload root latest.json to R2
+        if: ${{ !inputs.dry_run && inputs.overwrite_latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws s3 cp release-assets/r2-latest.json "s3://${R2_BUCKET}/latest.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=60, must-revalidate" \
+            --no-progress
+
+      - name: List uploaded R2 files
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+
+          echo "Versioned release files:"
+          aws s3 ls "s3://${R2_BUCKET}/releases/${TAG}/" \
+            --endpoint-url "${R2_ENDPOINT}"
+
+          echo
+          echo "Root latest.json:"
+          aws s3 ls "s3://${R2_BUCKET}/latest.json" \
+            --endpoint-url "${R2_ENDPOINT}" || true
+
+      - name: Verify public URLs
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+          BASE="${DOWNLOAD_BASE_URL%/}"
+
+          echo "Checking versioned latest.json..."
+          curl -fsSI "${BASE}/releases/${TAG}/latest.json"
+
+          if [ "${{ inputs.overwrite_latest }}" = "true" ]; then
+            echo
+            echo "Checking root latest.json..."
+            curl -fsSI "${BASE}/latest.json"
+          fi
+
+          echo
+          echo "Checking installer URLs from manifest..."
+          node <<'NODE'
+          const fs = require('fs');
+
+          const manifest = JSON.parse(fs.readFileSync('release-assets/r2-latest.json', 'utf8'));
+
+          for (const [platform, item] of Object.entries(manifest.platforms || {})) {
+            console.log(`${platform}: ${item.url}`);
+          }
+          NODE
