@@ -63,17 +63,17 @@
   --popover: var(--df-bg-panel);
   --popover-foreground: var(--df-text);
   --primary: var(--df-primary);
-  --primary-foreground: #fff;
+  --primary-foreground: var(--df-on-primary);
   --secondary: var(--df-bg-hover);
   --secondary-foreground: var(--df-text);
   --muted: var(--df-bg-hover);
   --muted-foreground: var(--df-text-muted);
   --accent: var(--df-bg-hover);
   --accent-foreground: var(--df-text);
-  --destructive: #dc2626;
+  --destructive: var(--df-danger);
   --border: var(--df-border);
   --input: var(--df-border);
-  --ring: var(--df-primary);
+  --ring: var(--df-focus-ring);
 }
 
 /* ── Theme-aware scrollbar ──────────────────────────────────────────────── */
