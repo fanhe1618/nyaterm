@@ -2244,9 +2244,9 @@ dependencies = [
 
 [[package]]
 name = "genai"
-version = "0.6.0-beta.18"
+version = "0.6.0-beta.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c4cdcea8e154cc3b2a6dc4a965acc8523ce94e760320e33dbe9fe304cecba77"
+checksum = "ddaa20437f71cbfa74abe1d1ce7b3503cff2d0c0f96f93ef06a42f24d5ef5d52"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -2254,6 +2254,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "mime_guess",
+ "paste",
  "regex",
  "reqwest 0.13.2",
  "serde",
@@ -4475,6 +4476,12 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pathdiff"
