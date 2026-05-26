@@ -3,11 +3,9 @@ import { type ElementType, useCallback, useEffect, useMemo, useState } from "rea
 import { useTranslation } from "react-i18next";
 import {
   MdBlock,
-  MdCheckCircle,
   MdDelete,
   MdDeleteSweep,
   MdDownload,
-  MdError,
   MdFolder,
   MdFolderOff,
   MdPause,
@@ -15,7 +13,6 @@ import {
   MdPlaylistRemove,
   MdRefresh,
   MdSwapHoriz,
-  MdSync,
   MdUpload,
 } from "react-icons/md";
 import { toast } from "sonner";
@@ -126,24 +123,19 @@ function TransferRow({
   const canCancel = item.status === "transferring" || item.status === "paused";
   const canDelete = !canCancel;
 
-  let statusIcon: ElementType = MdSync;
   let statusColor = "#facc15";
   let statusText = `${progress}%`;
 
   if (item.status === "paused") {
-    statusIcon = MdPause;
     statusColor = "#fb923c";
     statusText = t("fileTransfer.paused");
   } else if (item.status === "completed") {
-    statusIcon = MdCheckCircle;
     statusColor = "#4ade80";
     statusText = t("fileTransfer.completed");
   } else if (item.status === "error") {
-    statusIcon = MdError;
     statusColor = "#f87171";
     statusText = t("fileTransfer.error");
   } else if (item.status === "cancelled") {
-    statusIcon = MdBlock;
     statusColor = "#a1a1aa";
     statusText = t("fileTransfer.cancelled");
   }
