@@ -2,9 +2,10 @@ import { downloadDir } from "@tauri-apps/api/path";
 import { type ElementType, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  MdCancel,
+  MdBlock,
   MdCheckCircle,
   MdDelete,
+  MdDeleteSweep,
   MdDownload,
   MdError,
   MdFolder,
@@ -112,10 +113,10 @@ function TransferRow({
       ? hasByteProgress
         ? byteProgress
         : item.itemCountTotal && item.itemCountTotal > 0
-        ? Math.min(100, Math.round(((item.itemCountCompleted ?? 0) / item.itemCountTotal) * 100))
-        : item.status === "completed"
-          ? 100
-          : 0
+          ? Math.min(100, Math.round(((item.itemCountCompleted ?? 0) / item.itemCountTotal) * 100))
+          : item.status === "completed"
+            ? 100
+            : 0
       : item.totalSize > 0
         ? Math.min(100, Math.round((item.bytesTransferred / item.totalSize) * 100))
         : 0;
@@ -142,12 +143,10 @@ function TransferRow({
     statusColor = "#f87171";
     statusText = t("fileTransfer.error");
   } else if (item.status === "cancelled") {
-    statusIcon = MdCancel;
+    statusIcon = MdBlock;
     statusColor = "#a1a1aa";
     statusText = t("fileTransfer.cancelled");
   }
-
-  const StatusIcon = statusIcon;
 
   return (
     <ContextMenu>
@@ -215,8 +214,15 @@ function TransferRow({
                 {statusText}
               </span>
             ) : (
-              <StatusIcon className="text-sm shrink-0" style={{ color: statusColor }} />
-            )}
+              <span
+                className="shrink-0 rounded px-1.5 py-0.5 text-[0.625rem]"
+                style={{
+                  color: statusColor,
+                  backgroundColor: "color-mix(in srgb, currentColor 12%, transparent)",
+                }}
+              >
+                {statusText}
+              </span>            )}
           </div>
 
           {(item.status === "transferring" || item.status === "paused") &&
@@ -253,7 +259,7 @@ function TransferRow({
           {t("fileTransfer.retry")}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onCancel(item.id)} disabled={!canCancel}>
-          <MdCancel className="mr-2 text-[0.875rem]" />
+          <MdBlock className="mr-2 text-[0.875rem]" />
           {t("fileTransfer.cancel")}
         </ContextMenuItem>
         {item.direction === "download" && (
@@ -320,6 +326,9 @@ export default function FileTransfer({ activeSessionId }: FileTransferProps) {
     (transfer) => transfer.status === "transferring" || transfer.status === "paused",
   );
   const hasCompleted = visibleTransfers.some((transfer) => transfer.status === "completed");
+  const hasClearable = visibleTransfers.some(
+    (transfer) => transfer.status !== "transferring" && transfer.status !== "paused",
+  );
 
   const handlePauseAll = useCallback(() => {
     void Promise.all(
@@ -328,6 +337,12 @@ export default function FileTransfer({ activeSessionId }: FileTransferProps) {
         .map((transfer) => pauseTransfer(transfer.id)),
     );
   }, [pauseTransfer, visibleTransfers]);
+
+  const handleClearAll = useCallback(() => {
+    visibleTransfers
+      .filter((transfer) => transfer.status !== "transferring" && transfer.status !== "paused")
+      .forEach((transfer) => removeTransfer(transfer.id));
+  }, [removeTransfer, visibleTransfers]);
 
   const handleResumeAll = useCallback(() => {
     void Promise.all(
@@ -385,7 +400,7 @@ export default function FileTransfer({ activeSessionId }: FileTransferProps) {
             />
             <HeaderActionButton
               label={t("fileTransfer.cancelAll")}
-              icon={MdCancel}
+              icon={MdBlock}
               onClick={handleCancelAll}
               disabled={!hasActive}
             />
@@ -394,6 +409,12 @@ export default function FileTransfer({ activeSessionId }: FileTransferProps) {
               icon={MdPlaylistRemove}
               onClick={clearCompleted}
               disabled={!hasCompleted}
+            />
+            <HeaderActionButton
+              label={t("fileTransfer.clearAll")}
+              icon={MdDeleteSweep}
+              onClick={handleClearAll}
+              disabled={!hasClearable}
             />
           </>
         }
