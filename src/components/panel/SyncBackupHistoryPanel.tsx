@@ -4,7 +4,6 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   MdCheckCircle,
-  MdCloudSync,
   MdContentCopy,
   MdError,
   MdExpandLess,
@@ -43,7 +42,7 @@ function stateConfig(state: SyncState): {
   switch (state) {
     case "running":
       return {
-        icon: <MdCloudSync className="animate-spin" />,
+        icon: <MdRefresh className="animate-spin" />,
         dot: "bg-blue-500",
         badge: "bg-blue-500/15 text-blue-500 ring-1 ring-blue-500/30",
       };
