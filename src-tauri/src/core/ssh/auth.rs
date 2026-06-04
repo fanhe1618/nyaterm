@@ -971,15 +971,58 @@ async fn try_keyboard_interactive_after_partial(
 }
 
 fn should_auto_fill_password_prompts(prompts: &[client::Prompt]) -> bool {
-    prompts.len() == 1 && !prompts[0].echo
+    prompts.len() == 1
+        && !prompts[0].echo
+        && is_password_keyboard_interactive_prompt(&prompts[0].prompt)
+}
+
+fn is_password_keyboard_interactive_prompt(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+
+    let additional_factor_markers = [
+        "otp",
+        "totp",
+        "hotp",
+        "2fa",
+        "mfa",
+        "one-time",
+        "one time",
+        "verification",
+        "authentication code",
+        "auth code",
+        "authenticator",
+        "passcode",
+        "token",
+        "code",
+        "验证码",
+        "校验码",
+        "动态码",
+        "动态密码",
+        "动态口令",
+        "一次性",
+        "令牌",
+        "双因素",
+        "二次",
+        "两步",
+    ];
+    if additional_factor_markers
+        .iter()
+        .any(|marker| normalized.contains(marker))
+    {
+        return false;
+    }
+
+    ["password", "passphrase", "密码", "口令"]
+        .iter()
+        .any(|marker| normalized.contains(marker))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        is_totp_code_reused, record_totp_code_use, resolve_password_material,
-        seconds_until_next_totp_step, should_auto_fill_password_prompts, used_totp_codes,
-        KeyboardInteractiveMode, TotpUseCandidate,
+        is_password_keyboard_interactive_prompt, is_totp_code_reused, record_totp_code_use,
+        resolve_password_material, seconds_until_next_totp_step, should_auto_fill_password_prompts,
+        used_totp_codes, KeyboardInteractiveMode, TotpUseCandidate,
     };
     use crate::config::ConnectionAuth;
     use russh::client::Prompt;
@@ -992,6 +1035,34 @@ mod tests {
         }];
 
         assert!(should_auto_fill_password_prompts(&prompts));
+    }
+
+    #[test]
+    fn does_not_auto_fill_single_otp_keyboard_interactive_prompt() {
+        let prompts = vec![Prompt {
+            prompt: "Verification code: ".to_string(),
+            echo: false,
+        }];
+
+        assert!(!should_auto_fill_password_prompts(&prompts));
+    }
+
+    #[test]
+    fn does_not_treat_passcode_as_password_prompt() {
+        assert!(!is_password_keyboard_interactive_prompt("Passcode: "));
+        assert!(!is_password_keyboard_interactive_prompt("OTP Password: "));
+        assert!(!is_password_keyboard_interactive_prompt("动态口令: "));
+        assert!(!is_password_keyboard_interactive_prompt("验证码: "));
+    }
+
+    #[test]
+    fn recognizes_password_keyboard_interactive_prompts() {
+        assert!(is_password_keyboard_interactive_prompt(
+            "root@example.com's password: "
+        ));
+        assert!(is_password_keyboard_interactive_prompt("Passphrase: "));
+        assert!(is_password_keyboard_interactive_prompt("密码: "));
+        assert!(is_password_keyboard_interactive_prompt("口令: "));
     }
 
     #[test]
