@@ -658,6 +658,7 @@
     "allCategories": "All",
     "appendHint": "Place command at the prompt for review.",
     "appendOnly": "Append",
+    "appendOnlyBadge": "Append",
     "category": "Category",
     "categoryName": "Category",
     "categoryNameDuplicated": "Category already exists",
