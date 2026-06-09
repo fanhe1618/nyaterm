@@ -62,7 +62,7 @@ export function isValidDomain(text: string): boolean {
 }
 
 export function isValidArchiveName(text: string): boolean {
-  return /\.(zip|7z|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(text);
+  return /\.(zip|rar|7z|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(text);
 }
 
 export function isValidHostPort(text: string): boolean {

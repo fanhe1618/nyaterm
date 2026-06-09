@@ -204,6 +204,7 @@ export function createArchiveMatcher(options: ArchiveMatcherOptions = {}): Actio
         const f = shellQuote(ctx.value);
 
         if (/\.zip$/i.test(ctx.value)) return `unzip ${f}`;
+        if (/\.rar$/i.test(ctx.value)) return `unrar x ${f}`;
         if (/\.7z$/i.test(ctx.value)) return `7z x ${f}`;
         if (/\.(tar\.gz|tgz)$/i.test(ctx.value)) return `tar -xzvf ${f}`;
         if (/\.(tar\.bz2|tbz2)$/i.test(ctx.value)) return `tar -xjf ${f}`;
@@ -222,6 +223,7 @@ export function createArchiveMatcher(options: ArchiveMatcherOptions = {}): Actio
         const f = shellQuote(ctx.value);
 
         if (/\.zip$/i.test(ctx.value)) return `unzip -l ${f}`;
+        if (/\.rar$/i.test(ctx.value)) return `unrar l ${f}`;
         if (/\.7z$/i.test(ctx.value)) return `7z l ${f}`;
         if (/\.(tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(ctx.value)) {
           return `tar -tf ${f}`;
@@ -239,7 +241,7 @@ export function createArchiveMatcher(options: ArchiveMatcherOptions = {}): Actio
     label: options.label ?? "Archive",
     kind: "archive",
     priority: options.priority ?? 80,
-    regex: /\b(?:[^\s"'`<>|]+?\.(?:zip|7z|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz))\b/gi,
+    regex: /\b(?:[^\s"'`<>|]+?\.(?:zip|rar|7z|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz))\b/gi,
     validate: (text) => isValidArchiveName(text),
     getActions: () => finalizedActions,
     getTooltip: makeCommonTooltip(options.tooltip, finalizedActions),
