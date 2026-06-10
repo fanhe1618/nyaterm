@@ -162,8 +162,8 @@ export const SEARCH_ICONS: Record<string, QuickIconDef> = {
 export type SearchIconName = keyof typeof SEARCH_ICONS;
 
 export function getFileIcon(entry: FileEntry): { icon: ElementType; color: string } {
-  if (entry.is_dir) return { icon: MdFolder, color: "#fbbf24" }; // amber-400
   if (entry.is_symlink) return { icon: MdLink, color: "#67e8f9" }; // cyan-300
+  if (entry.is_dir) return { icon: MdFolder, color: "#fbbf24" }; // amber-400
 
   const ext = entry.name.includes(".") ? (entry.name.split(".").pop()?.toLowerCase() ?? "") : "";
 

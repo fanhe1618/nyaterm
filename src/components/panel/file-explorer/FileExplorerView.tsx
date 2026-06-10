@@ -250,6 +250,7 @@ function FileExplorer({
     const container = listContainerRef.current;
     if (container) {
       container.scrollTop = 0;
+      container.scrollLeft = 0;
     }
     setListScrollTop(0);
   }, [listScrollResetKey]);
@@ -263,6 +264,7 @@ function FileExplorer({
     const container = listContainerRef.current;
     if (container) {
       container.scrollTop = 0;
+      container.scrollLeft = 0;
     }
     setListScrollTop(0);
   }, [listFilterResetKey]);
@@ -1640,7 +1642,7 @@ function FileExplorer({
     );
     const frame = window.requestAnimationFrame(() => {
       container.scrollTop = nextScrollTop;
-      setListScrollTop(nextScrollTop);
+      setListScrollTop(container.scrollTop);
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -1825,6 +1827,8 @@ function FileExplorer({
                       style={{
                         paddingTop: virtualListPadding.top,
                         paddingBottom: virtualListPadding.bottom + 8,
+                        minWidth: fileListTableWidth,
+                        width: fileListTableWidth,
                       }}
                     >
                       {visibleEntries.map((entry) => (
@@ -1832,6 +1836,7 @@ function FileExplorer({
                           key={entry.name}
                           entry={entry}
                           isSelected={selectedFiles.has(entry.name)}
+                          selectedCount={selectedRealFiles.length}
                           isParentDirectoryEntry={isParentDirectoryEntry(entry)}
                           activeSessionId={activeSessionId}
                           columnTemplate={fileListGridTemplate}

@@ -37,6 +37,7 @@ import {
 interface FileListItemProps {
   entry: FileEntry;
   isSelected: boolean;
+  selectedCount: number;
   isParentDirectoryEntry?: boolean;
   activeSessionId: string | null;
   columnTemplate: string;
@@ -83,6 +84,7 @@ function getFilenameSelectionEnd(name: string): number {
 export function FileListItem({
   entry,
   isSelected,
+  selectedCount,
   isParentDirectoryEntry = false,
   activeSessionId,
   columnTemplate,
@@ -113,6 +115,8 @@ export function FileListItem({
   const { t } = useTranslation();
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameBlurGuardUntilRef = useRef(0);
+  const renameClickTimerRef = useRef<number | null>(null);
+  const wasSingleSelectedOnMouseDownRef = useRef(false);
   const preventNextContextMenuAutoFocusRef = useRef(false);
   const entryIcon = getFileIcon(entry);
   const modifiedTime = formatModifiedTime(entry.mtime);
@@ -161,6 +165,39 @@ export function FileListItem({
     };
   }, [entry.name, isRenaming]);
 
+  useEffect(() => {
+    return () => {
+      if (renameClickTimerRef.current !== null) {
+        window.clearTimeout(renameClickTimerRef.current);
+      }
+    };
+  }, []);
+
+  const clearPendingRenameClick = () => {
+    if (renameClickTimerRef.current === null) return;
+    window.clearTimeout(renameClickTimerRef.current);
+    renameClickTimerRef.current = null;
+  };
+
+  const handleNameClick = (event: React.MouseEvent<HTMLSpanElement>) => {
+    if (
+      event.button !== 0 ||
+      event.detail !== 1 ||
+      isRenaming ||
+      !activeSessionId ||
+      !wasSingleSelectedOnMouseDownRef.current ||
+      isParentDirectoryEntry
+    ) {
+      return;
+    }
+
+    clearPendingRenameClick();
+    renameClickTimerRef.current = window.setTimeout(() => {
+      renameClickTimerRef.current = null;
+      onRename(entry);
+    }, 220);
+  };
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -182,6 +219,9 @@ export function FileListItem({
             if (!isSelected) e.currentTarget.style.backgroundColor = "";
           }}
           onMouseDown={(e) => {
+            wasSingleSelectedOnMouseDownRef.current =
+              e.button === 0 && isSelected && selectedCount === 1;
+            clearPendingRenameClick();
             if (isRenaming) {
               e.stopPropagation();
               return;
@@ -189,6 +229,7 @@ export function FileListItem({
             onSelectionStart(entry, e);
           }}
           onDoubleClick={() => {
+            clearPendingRenameClick();
             if (isRenaming) return;
             if (entry.is_dir) {
               onItemClick(entry);
@@ -246,7 +287,9 @@ export function FileListItem({
                 disabled={inlineRename.isSubmitting}
               />
             ) : (
-              <span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>
+              <span className="min-w-0 flex-1 truncate text-xs" onClick={handleNameClick}>
+                {entry.name}
+              </span>
             )}
           </div>
           <span
