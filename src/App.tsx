@@ -7,7 +7,9 @@ import AppLayout from "./components/app/AppLayout";
 import AppPanelContent from "./components/app/AppPanelContent";
 import type { HostKeyVerifyRequest } from "./components/dialog/connections/HostKeyVerifyDialog";
 import type { OtpRequest } from "./components/dialog/connections/OtpDialog";
-import SessionQuickSwitcher from "./components/terminal/SessionQuickSwitcher";
+import SessionQuickSwitcher, {
+  type QuickSwitcherSession,
+} from "./components/terminal/SessionQuickSwitcher";
 import { useApp } from "./context/AppContext";
 import { TransferProvider } from "./context/TransferContext";
 import { useActivityBarController } from "./hooks/useActivityBarController";
@@ -1916,17 +1918,27 @@ function App() {
   const showCommandsShortcut = resolveDisplayKeys("view.showAllCommands", appSettings.keybindings);
   const switchTerminalShortcut = resolveDisplayKeys("tab.quickSwitch", appSettings.keybindings);
 
-  const workspaceSessionIds = useMemo(() => {
-    const ids = new Set<string>();
+  const quickSwitcherSessions = useMemo<QuickSwitcherSession[]>(() => {
+    const connectionsById = new Map(
+      savedConnections.map((connection) => [connection.id, connection]),
+    );
+    const sessions: QuickSwitcherSession[] = [];
     for (const tab of tabs) {
       for (const pane of collectSessionPanes(tab.root)) {
-        if (!pane.connecting && !pane.connectError) {
-          ids.add(pane.sessionId);
-        }
+        const connection = pane.connectionId ? connectionsById.get(pane.connectionId) : undefined;
+        sessions.push({
+          id: pane.sessionId,
+          name: pane.name,
+          sessionType: pane.type,
+          connectionName: connection?.name,
+          tabName: getTabDisplayName(tab),
+          connecting: pane.connecting,
+          connectError: pane.connectError,
+        });
       }
     }
-    return ids;
-  }, [tabs]);
+    return sessions;
+  }, [savedConnections, tabs]);
 
   const handleCloseSessionQuickSwitcher = useCallback(() => {
     setShowSessionQuickSwitcher(false);
@@ -2177,8 +2189,8 @@ function App() {
       />
       <SessionQuickSwitcher
         open={showSessionQuickSwitcher}
-        activeSessionId={activeSessionId}
-        workspaceSessionIds={workspaceSessionIds}
+        activeSessionId={activePane?.sessionId ?? null}
+        workspaceSessions={quickSwitcherSessions}
         savedConnections={savedConnections}
         onClose={handleCloseSessionQuickSwitcher}
         onSelectSession={handleQuickSwitchSession}
