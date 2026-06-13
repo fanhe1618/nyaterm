@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { LuClipboardPaste, LuFolderSync } from "react-icons/lu";
 import {
   MdArrowDropDown,
   MdArrowDropUp,
@@ -25,8 +26,6 @@ import {
   MdLink,
   MdNoteAdd,
   MdRefresh,
-  MdSend,
-  MdSync,
   MdSyncLock,
   MdUpload,
 } from "react-icons/md";
@@ -192,8 +191,9 @@ function FileExplorer({
   const autoSyncCwd = !!activeConnectionId && autoSyncConnectionIds.includes(activeConnectionId);
   const favoriteDirectoriesByConnection =
     appSettings.ui.file_explorer_favorite_dirs_by_connection_id ?? {};
-  const favoriteDirectories =
-    activeConnectionId ? (favoriteDirectoriesByConnection[activeConnectionId] ?? []) : [];
+  const favoriteDirectories = activeConnectionId
+    ? (favoriteDirectoriesByConnection[activeConnectionId] ?? [])
+    : [];
   const listScrollResetKey = `${activeSessionId ?? ""}:${currentPath}`;
   const listFilterResetKey = `${fileSearchQuery}:${fileSortMode.column}:${fileSortMode.direction}`;
 
@@ -1940,7 +1940,7 @@ function FileExplorer({
               {t("fileExplorer.copyDirPath")}
             </ContextMenuItem>
             <ContextMenuItem onClick={handleSendCurrentPathToTerminal}>
-              <MdSend className="mr-2 h-4 w-4" />
+              <LuClipboardPaste className="mr-2 h-4 w-4" />
               {t("fileExplorer.sendDirPathToTerminal")}
             </ContextMenuItem>
             <ContextMenuSeparator />
@@ -1984,7 +1984,7 @@ function FileExplorer({
                     onClick={handleSyncCwd}
                     disabled={!cwdTrackingActive}
                   >
-                    <MdSync className="h-[0.875rem] w-[0.875rem]" />
+                    <LuFolderSync className="h-[0.875rem] w-[0.875rem]" />
                   </Button>
                 </span>
               </TooltipTrigger>
@@ -2034,7 +2034,7 @@ function FileExplorer({
                       }
                     }}
                   >
-                    <MdSend className="h-[0.875rem] w-[0.875rem]" />
+                    <LuClipboardPaste className="h-[0.875rem] w-[0.875rem]" />
                   </Button>
                 </span>
               </TooltipTrigger>
