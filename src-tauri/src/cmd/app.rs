@@ -262,13 +262,26 @@ fn open_folder(path: &Path) -> AppResult<()> {
 
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer")
-            .arg(path.as_os_str())
-            .spawn()
-            .map_err(|error| {
-                AppError::Config(format!("Failed to open target directory: {error}"))
-            })?;
-        Ok(())
+        match open::that(path) {
+            Ok(_) => return Ok(()),
+            Err(error) if error.raw_os_error() == Some(740) => {
+                std::process::Command::new("explorer.exe")
+                    .arg(path.as_os_str())
+                    .spawn()
+                    .map_err(|fallback_error| {
+                        AppError::Config(format!(
+                            "Failed to open target directory: {fallback_error}; original error: {error}"
+                        ))
+                    })?;
+
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(AppError::Config(format!(
+                    "Failed to open target directory: {error}"
+                )));
+            }
+        }
     }
     #[cfg(not(windows))]
     {
