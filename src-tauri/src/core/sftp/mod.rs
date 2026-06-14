@@ -28,6 +28,7 @@ use tokio::sync::RwLock;
 pub(crate) use duplicate::TransferDuplicateManager;
 pub(crate) use transfer::{active_transfer_count, transfer_target_directory};
 pub use transfer::{cancel_transfer, pause_transfer, resume_transfer};
+pub(crate) use util::sanitize_download_file_name;
 pub use util::{FileEntry, FileProperties, RemoteFileAttributeUpdate, RemoteTextFile};
 
 /// Orchestrator that lazily initialises the best available remote file system

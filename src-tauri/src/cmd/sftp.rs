@@ -41,6 +41,11 @@ pub async fn rename_remote_file(
 }
 
 #[tauri::command]
+pub fn sanitize_download_file_name(name: String) -> String {
+    sftp::sanitize_download_file_name(&name)
+}
+
+#[tauri::command]
 pub async fn download_remote_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<SessionManager>>,

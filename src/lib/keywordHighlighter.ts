@@ -70,7 +70,8 @@ export class KeywordHighlighter implements IDisposable {
    * Large enough to absorb typical keyboard/mouse scroll bursts without flicker,
    * small enough to bound memory usage on large scrollback buffers.
    */
-  private static readonly OVERSCAN_LINES = 200;
+  private static readonly OVERSCAN_LINES = 120;
+  private static readonly MAX_LOGICAL_LINE_SCAN_CHARS = 16 * 1024;
 
   constructor(term: XTerm) {
     this.term = term;
@@ -497,6 +498,9 @@ export class KeywordHighlighter implements IDisposable {
     if (logicalLength === 0) return new Map();
 
     const logicalText = segments.map((segment) => segment.text).join("");
+    if (logicalText.length > KeywordHighlighter.MAX_LOGICAL_LINE_SCAN_CHARS) {
+      return new Map();
+    }
     const occupied = new Uint8Array(logicalText.length);
 
     for (const segment of segments) {

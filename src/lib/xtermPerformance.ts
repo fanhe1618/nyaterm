@@ -8,8 +8,14 @@ export const XTERM_PERFORMANCE_CONFIG = {
   output: {
     /** Max characters to write into xterm in a single call. */
     writeChunkChars: 32 * 1024,
-    /** Max synchronous work budget per animation frame. */
-    frameBudgetMs: 8,
+    /** Pause backend output when visible terminal backlog exceeds this size. */
+    visiblePauseHighWatermark: 256 * 1024,
+    /** Resume backend output when visible terminal backlog drops below this size. */
+    visiblePauseLowWatermark: 64 * 1024,
+    /** Pause backend output sooner while the terminal is hidden. */
+    hiddenPauseHighWatermark: 128 * 1024,
+    /** Resume backend output sooner while the terminal is hidden. */
+    hiddenPauseLowWatermark: 32 * 1024,
     /** Queue cap while the terminal is visible. */
     visibleBacklogCap: 1_000_000,
     /** Queue cap while the terminal is hidden. */

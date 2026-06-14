@@ -1423,8 +1423,9 @@ impl RemoteFs for SftpBackend {
         transfer_id: Option<String>,
     ) -> AppResult<()> {
         let max_retries = transfer_settings.max_transfer_retries;
+        let safe_local_path = sanitize_local_download_target(local_path, remote_path);
         let actual_local_path =
-            match resolve_local_path(local_path, &transfer_settings.duplicate_strategy) {
+            match resolve_local_path(&safe_local_path, &transfer_settings.duplicate_strategy) {
                 Some(path) => path,
                 None => {
                     let file_name = remote_path.split('/').last().unwrap_or(remote_path);
@@ -1433,7 +1434,7 @@ impl RemoteFs for SftpBackend {
                         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                     remember_transfer_target_external(
                         transfer_id.clone(),
-                        local_path.to_string(),
+                        safe_local_path.clone(),
                         "download".to_string(),
                         "file".to_string(),
                     );
@@ -1444,7 +1445,7 @@ impl RemoteFs for SftpBackend {
                             session_id: session_id.to_string(),
                             file_name: file_name.to_string(),
                             remote_path: remote_path.to_string(),
-                            local_path: local_path.to_string(),
+                            local_path: safe_local_path,
                             direction: "download".to_string(),
                             kind: "file".to_string(),
                             status: "completed".to_string(),
@@ -1844,7 +1845,7 @@ impl SftpBackend {
             wait_for_transfer_ready(directory_controller).await?;
 
             let child_remote = format!("{}/{}", remote_path.trim_end_matches('/'), entry.name);
-            let child_local = format!("{}/{}", local_path.trim_end_matches('/'), entry.name);
+            let child_local = append_safe_local_child_path(local_path, &entry.name);
 
             if entry.is_dir {
                 Box::pin(self.collect_remote_directory_files(

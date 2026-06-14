@@ -239,7 +239,7 @@ export function useCommandHistory(
 
   const handleSelectSuggestion = useCallback(
     (command: string) => {
-      applySuggestion(command, true);
+      applySuggestion(command, false);
       dismissSuggestions();
       terminalRef.current?.focus();
     },

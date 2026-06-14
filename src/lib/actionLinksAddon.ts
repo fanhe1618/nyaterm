@@ -342,10 +342,11 @@ export class ActionLinksAddon implements ITerminalAddon, ILinkProvider {
   private _sentinelDisposable: IDisposable | null = null;
   private _bufferTrimmed = false;
 
-  private static readonly OVERSCAN_LINES = 200;
+  private static readonly OVERSCAN_LINES = 120;
   private static readonly DECORATION_DEBOUNCE_MS = 50;
   private static readonly DECORATION_THROTTLE_MS = 80;
   private static readonly MAX_CACHE_ENTRIES = 2000;
+  private static readonly MAX_LOGICAL_LINE_SCAN_CHARS = 16 * 1024;
 
   constructor(matchers: ActionMatcher[] = [], options: ActionLinksAddonOptions = {}) {
     this._matchers = [...matchers].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
@@ -452,6 +453,10 @@ export class ActionLinksAddon implements ITerminalAddon, ILinkProvider {
 
     const parsed = this._getLogicalLineByBufferLine(terminal, bufferLineNumber);
     if (!parsed) {
+      callback(undefined);
+      return;
+    }
+    if (parsed.full.length > ActionLinksAddon.MAX_LOGICAL_LINE_SCAN_CHARS) {
       callback(undefined);
       return;
     }
@@ -579,6 +584,13 @@ export class ActionLinksAddon implements ITerminalAddon, ILinkProvider {
       if (!parsed) {
         if (absLineY < buffer.baseY) {
           this._scannedAbsLines.add(absLineY);
+        }
+        continue;
+      }
+      if (parsed.full.length > ActionLinksAddon.MAX_LOGICAL_LINE_SCAN_CHARS) {
+        if (parsed.endY < buffer.baseY) {
+          this._scannedAbsLines.add(absLineY);
+          this._lineToDecoKeys.delete(absLineY);
         }
         continue;
       }

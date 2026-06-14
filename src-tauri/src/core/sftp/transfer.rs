@@ -341,6 +341,46 @@ pub(crate) fn file_name_from_path(path: &str) -> String {
         .to_string()
 }
 
+pub(crate) fn sanitize_local_download_target(local_path: &str, remote_path: &str) -> String {
+    let remote_file_name = remote_file_name_from_path(remote_path);
+    let safe_file_name = super::util::sanitize_download_file_name(&remote_file_name);
+    if safe_file_name == remote_file_name {
+        return local_path.to_string();
+    }
+
+    if let Some(prefix) = local_path.strip_suffix(&remote_file_name)
+        && prefix
+            .chars()
+            .next_back()
+            .is_some_and(|ch| matches!(ch, '/' | '\\'))
+    {
+        return format!("{prefix}{safe_file_name}");
+    }
+
+    let path = std::path::Path::new(local_path);
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return local_path.to_string();
+    };
+
+    if file_name != remote_file_name {
+        return local_path.to_string();
+    }
+
+    path.parent()
+        .map(|parent| parent.join(&safe_file_name))
+        .unwrap_or_else(|| std::path::PathBuf::from(&safe_file_name))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn remote_file_name_from_path(path: &str) -> String {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .next_back()
+        .unwrap_or(path)
+        .to_string()
+}
+
 pub(crate) fn create_directory_transfer_controller(
     id: Option<String>,
     session_id: &str,
@@ -396,7 +436,7 @@ pub(crate) async fn wait_for_transfer_ready(controller: &Arc<TransferController>
         match controller.control_state() {
             TransferControlState::Running => return Ok(()),
             TransferControlState::Cancelled => {
-                return Err(AppError::Cancelled(TRANSFER_CANCELLED_MESSAGE.to_string()))
+                return Err(AppError::Cancelled(TRANSFER_CANCELLED_MESSAGE.to_string()));
             }
             TransferControlState::Paused => notified.await,
         }

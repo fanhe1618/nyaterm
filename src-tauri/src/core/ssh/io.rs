@@ -320,6 +320,7 @@ pub(super) async fn ssh_io_loop(
     arm_post_login_timer(&pending_post_login, &mut post_login_deadline);
     let mut remote_exit_status: Option<u32> = None;
     let mut remote_exit_signal: Option<String> = None;
+    let mut output_paused = false;
 
     let mut zmodem_detector = ZmodemDetector::new();
     let mut zmodem_transfer: Option<ZmodemTransfer> = None;
@@ -352,6 +353,12 @@ pub(super) async fn ssh_io_loop(
                     }
                     Some(SessionCommand::Resize { cols, rows }) => {
                         let _ = channel.window_change(cols, rows, 0, 0).await;
+                    }
+                    Some(SessionCommand::PauseOutput) => {
+                        output_paused = true;
+                    }
+                    Some(SessionCommand::ResumeOutput) => {
+                        output_paused = false;
                     }
                     Some(SessionCommand::CaptureExec { marker_id, wrapped_command, result_tx }) => {
                         capture_processor.register(marker_id, result_tx);
@@ -398,7 +405,7 @@ pub(super) async fn ssh_io_loop(
                     }
                 }
             }
-            msg = channel.wait() => {
+            msg = channel.wait(), if !output_paused => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
                         // ZMODEM: if a transfer is active, route raw bytes to it.

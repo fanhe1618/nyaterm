@@ -256,6 +256,7 @@ async fn telnet_session_task(
     let output_reader = output.clone();
     let reader_connection_id = connection_id.clone();
     let recording_mgr_reader = recording_mgr.clone();
+    let (pause_tx, mut pause_rx) = tokio::sync::watch::channel(false);
 
     let (negotiate_tx, mut negotiate_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -263,6 +264,11 @@ async fn telnet_session_task(
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
         loop {
+            while *pause_rx.borrow() {
+                if pause_rx.changed().await.is_err() {
+                    return;
+                }
+            }
             match reader.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
@@ -460,6 +466,12 @@ async fn telnet_session_task(
                     Some(SessionCommand::Resize { cols, rows }) => {
                         let naws = build_naws(cols as u16, rows as u16);
                         let _ = writer.write_all(&naws).await;
+                    }
+                    Some(SessionCommand::PauseOutput) => {
+                        let _ = pause_tx.send(true);
+                    }
+                    Some(SessionCommand::ResumeOutput) => {
+                        let _ = pause_tx.send(false);
                     }
                     Some(SessionCommand::ZmodemAcceptDownload { save_dir }) => {
                         let mut zm = zmodem_state.lock().await;

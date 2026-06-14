@@ -93,6 +93,10 @@ pub enum SessionCommand {
     Attach,
     /// User input to send to the terminal.
     Write(Vec<u8>),
+    /// Temporarily stop reading output from the underlying terminal source.
+    PauseOutput,
+    /// Resume reading output from the underlying terminal source.
+    ResumeOutput,
     /// Terminal size change (cols × rows).
     Resize { cols: u32, rows: u32 },
     /// Close the session and clean up.
@@ -671,6 +675,15 @@ mod tests {
 
     fn test_handle(id: &str, session_type: SessionType, injection_active: bool) -> SessionHandle {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
+        test_handle_with_sender(id, session_type, injection_active, cmd_tx)
+    }
+
+    fn test_handle_with_sender(
+        id: &str,
+        session_type: SessionType,
+        injection_active: bool,
+        cmd_tx: mpsc::UnboundedSender<SessionCommand>,
+    ) -> SessionHandle {
         SessionHandle {
             info: SessionInfo {
                 id: id.to_string(),
@@ -762,6 +775,35 @@ mod tests {
         assert!(manager.cancel_session_creation("create-1").await);
         assert!(cancel_rx.try_recv().is_ok());
         assert!(!manager.cancel_session_creation("create-1").await);
+    }
+
+    #[tokio::test]
+    async fn sends_output_pause_and_resume_commands() {
+        let manager = SessionManager::new();
+        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
+        manager
+            .add_session(test_handle_with_sender(
+                "local-flow",
+                SessionType::Local,
+                false,
+                cmd_tx,
+            ))
+            .await;
+
+        manager
+            .send_command("local-flow", SessionCommand::PauseOutput)
+            .await
+            .expect("pause command");
+        assert!(matches!(cmd_rx.recv().await, Some(SessionCommand::PauseOutput)));
+
+        manager
+            .send_command("local-flow", SessionCommand::ResumeOutput)
+            .await
+            .expect("resume command");
+        assert!(matches!(
+            cmd_rx.recv().await,
+            Some(SessionCommand::ResumeOutput)
+        ));
     }
 
     #[tokio::test]

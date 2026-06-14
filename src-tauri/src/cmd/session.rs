@@ -430,6 +430,20 @@ pub async fn write_to_session(
 }
 
 #[tauri::command]
+pub async fn set_session_output_paused(
+    state: tauri::State<'_, Arc<SessionManager>>,
+    session_id: String,
+    paused: bool,
+) -> AppResult<()> {
+    let command = if paused {
+        SessionCommand::PauseOutput
+    } else {
+        SessionCommand::ResumeOutput
+    };
+    state.send_command(&session_id, command).await
+}
+
+#[tauri::command]
 pub async fn zmodem_accept_download(
     state: tauri::State<'_, Arc<SessionManager>>,
     session_id: String,

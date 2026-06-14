@@ -218,6 +218,8 @@ fn serial_session_thread(
 
     let capture_processor = Arc::new(Mutex::new(OutputCaptureProcessor::new()));
     let capture_for_reader = capture_processor.clone();
+    let output_pause = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let output_pause_reader = output_pause.clone();
 
     let zmodem_state: Arc<Mutex<Option<ZmodemTransfer>>> = Arc::new(Mutex::new(None));
     let zmodem_state_reader = zmodem_state.clone();
@@ -240,6 +242,16 @@ fn serial_session_thread(
         let mut buf = [0u8; 4096];
         let mut zmodem_detector = ZmodemDetector::new();
         while reader_flag.load(std::sync::atomic::Ordering::Relaxed) {
+            {
+                let (lock, cvar) = &*output_pause_reader;
+                let mut paused = lock.lock().unwrap();
+                while *paused && reader_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    paused = cvar.wait(paused).unwrap();
+                }
+            }
+            if !reader_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
             let result = reader_port.read(&mut buf);
             match result {
                 Ok(0) => break,
@@ -404,6 +416,19 @@ fn serial_session_thread(
                 let _ = p.flush();
             }
             SessionCommand::Resize { .. } => {}
+            SessionCommand::PauseOutput => {
+                let (lock, _) = &*output_pause;
+                if let Ok(mut paused) = lock.lock() {
+                    *paused = true;
+                }
+            }
+            SessionCommand::ResumeOutput => {
+                let (lock, cvar) = &*output_pause;
+                if let Ok(mut paused) = lock.lock() {
+                    *paused = false;
+                    cvar.notify_all();
+                }
+            }
             SessionCommand::ZmodemAcceptDownload { save_dir } => {
                 let mut zm = zmodem_state.lock().unwrap();
                 if let Some(ref mut transfer) = *zm {
@@ -475,6 +500,13 @@ fn serial_session_thread(
     }
 
     reader_running.store(false, std::sync::atomic::Ordering::Relaxed);
+    {
+        let (lock, cvar) = &*output_pause;
+        if let Ok(mut paused) = lock.lock() {
+            *paused = false;
+            cvar.notify_all();
+        }
+    }
     output.close();
 
     if let Some(ref recorder) = recording_mgr {

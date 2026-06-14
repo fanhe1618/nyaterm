@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { LuClipboardPaste, LuFolderSync } from "react-icons/lu";
 import {
   MdArrowDropDown,
   MdArrowDropUp,
@@ -25,8 +26,6 @@ import {
   MdLink,
   MdNoteAdd,
   MdRefresh,
-  MdSend,
-  MdSync,
   MdSyncLock,
   MdUpload,
 } from "react-icons/md";
@@ -1406,6 +1405,9 @@ function FileExplorer({
     return downloadDir();
   };
 
+  const sanitizeDownloadFileName = async (name: string): Promise<string> =>
+    invoke<string>("sanitize_download_file_name", { name });
+
   const downloadEntries = async (entries: FileEntry[]) => {
     if (!activeSessionId || entries.length === 0) return;
 
@@ -1421,10 +1423,11 @@ function FileExplorer({
 
       if (askEach) {
         for (const entry of entries) {
+          const safeName = await sanitizeDownloadFileName(entry.name);
           if (entry.is_dir) {
             const localDir = await openDialog({ directory: true });
             if (!localDir || typeof localDir !== "string") continue;
-            const localPath = await join(localDir, entry.name);
+            const localPath = await join(localDir, safeName);
             downloads.push({
               sessionId: activeSessionId,
               fileName: entry.name,
@@ -1433,7 +1436,7 @@ function FileExplorer({
               kind: "directory",
             });
           } else {
-            const localPath = await saveDialog({ defaultPath: entry.name });
+            const localPath = await saveDialog({ defaultPath: safeName });
             if (!localPath) continue;
             downloads.push({
               sessionId: activeSessionId,
@@ -1451,7 +1454,8 @@ function FileExplorer({
       const defaultDir = await resolveDownloadDir();
 
       for (const entry of entries) {
-        const localPath = await join(defaultDir, entry.name);
+        const safeName = await sanitizeDownloadFileName(entry.name);
+        const localPath = await join(defaultDir, safeName);
         downloads.push({
           sessionId: activeSessionId,
           fileName: entry.name,
@@ -1544,7 +1548,8 @@ function FileExplorer({
     try {
       const tDir = await tempDir();
       const downloadTimestamp = Date.now().toString();
-      localPath = await join(tDir, "nyaterm", activeSessionId, downloadTimestamp, entry.name);
+      const safeName = await sanitizeDownloadFileName(entry.name);
+      localPath = await join(tDir, "nyaterm", activeSessionId, downloadTimestamp, safeName);
       await invoke("download_remote_file", {
         sessionId: activeSessionId,
         remotePath: getEntryFullPath(entry),
@@ -1937,7 +1942,7 @@ function FileExplorer({
               {t("fileExplorer.copyDirPath")}
             </ContextMenuItem>
             <ContextMenuItem onClick={handleSendCurrentPathToTerminal}>
-              <MdSend className="mr-2 h-4 w-4" />
+              <LuClipboardPaste className="mr-2 h-4 w-4" />
               {t("fileExplorer.sendDirPathToTerminal")}
             </ContextMenuItem>
             <ContextMenuSeparator />
@@ -1981,7 +1986,7 @@ function FileExplorer({
                     onClick={handleSyncCwd}
                     disabled={!cwdTrackingActive}
                   >
-                    <MdSync className="h-[0.875rem] w-[0.875rem]" />
+                    <LuFolderSync className="h-[0.875rem] w-[0.875rem]" />
                   </Button>
                 </span>
               </TooltipTrigger>
@@ -2031,7 +2036,7 @@ function FileExplorer({
                       }
                     }}
                   >
-                    <MdSend className="h-[0.875rem] w-[0.875rem]" />
+                    <LuClipboardPaste className="h-[0.875rem] w-[0.875rem]" />
                   </Button>
                 </span>
               </TooltipTrigger>
