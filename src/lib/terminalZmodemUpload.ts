@@ -1,9 +1,9 @@
+import { toast } from "sonner";
+import { getLocalPathName } from "@/components/panel/file-explorer/model";
+import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
 import { buildTerminalCommandInput, sendSessionInput } from "@/lib/sessionInput";
 import { showTransferDuplicatePrompt } from "@/lib/transferDuplicatePrompt";
-import { getLocalPathName } from "@/components/panel/file-explorer/model";
-import { toast } from "sonner";
-import i18n from "@/i18n";
 
 const ZMODEM_UPLOAD_TIMEOUT_MS = 60_000;
 
@@ -136,10 +136,10 @@ export async function probeAndResolveRemoteConflicts(
 
   // List remote directory (SFTP, time-boxed).
   const entries = await withTimeout(
-    invoke<{ name: string; is_dir: boolean }[] | null>(
-      "list_remote_dir",
-      { sessionId, path: remoteDir },
-    ).catch(() => null),
+    invoke<{ name: string; is_dir: boolean }[] | null>("list_remote_dir", {
+      sessionId,
+      path: remoteDir,
+    }).catch(() => null),
     SFTP_PROBE_TIMEOUT_MS,
     null as { name: string; is_dir: boolean }[] | null,
   );
@@ -174,8 +174,7 @@ export async function probeAndResolveRemoteConflicts(
   if (duplicateStrategy === "overwrite" || duplicateStrategy === "rename") {
     for (const fp of conflicts) {
       const name = getLocalPathName(fp, "file");
-      const remotePath =
-        remoteDir === "/" ? `/${name}` : `${remoteDir}/${name}`;
+      const remotePath = remoteDir === "/" ? `/${name}` : `${remoteDir}/${name}`;
       await withTimeout(
         invoke("delete_remote_file", { sessionId, path: remotePath }).catch(() => {}),
         SFTP_PROBE_TIMEOUT_MS,
@@ -190,8 +189,7 @@ export async function probeAndResolveRemoteConflicts(
 
   for (const fp of conflicts) {
     const name = getLocalPathName(fp, "file");
-    const remotePath =
-      remoteDir === "/" ? `/${name}` : `${remoteDir}/${name}`;
+    const remotePath = remoteDir === "/" ? `/${name}` : `${remoteDir}/${name}`;
 
     const choice = await showTransferDuplicatePrompt({
       requestId: crypto.randomUUID(),
@@ -245,11 +243,7 @@ export async function uploadFilesViaZmodem(
   // BEFORE sending `rz`, so the remote rz never sees an existing file to
   // prompt about.  If the SFTP channel is busy (e.g. file explorer panel is
   // open), the probe is time-boxed and we fall through.
-  const conflict = await probeAndResolveRemoteConflicts(
-    sessionId,
-    filePaths,
-    duplicateStrategy,
-  );
+  const conflict = await probeAndResolveRemoteConflicts(sessionId, filePaths, duplicateStrategy);
 
   if (conflict.paths.length === 0) {
     if (preparingUploadToastId !== null) {

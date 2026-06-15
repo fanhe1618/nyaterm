@@ -6,9 +6,9 @@ import { PiRecordFill } from "react-icons/pi";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { invoke } from "@/lib/invoke";
 import type { SessionInfo } from "@/types/global";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface RecordingPanelProps {
   activeSessionId: string | null;
@@ -168,10 +168,7 @@ function RecordingPanel({
                     className="flex min-w-0 items-center gap-1.5 font-mono text-[0.625rem]"
                     title={session.id}
                   >
-                    <span
-                      className="truncate"
-                      style={{ color: "var(--df-text-dimmed)" }}
-                    >
+                    <span className="truncate" style={{ color: "var(--df-text-dimmed)" }}>
                       {shortSessionId(session.id)}
                     </span>
 

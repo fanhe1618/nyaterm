@@ -1,11 +1,6 @@
 import { type RefObject, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  MdBookmarkAdd,
-  MdBookmarkAdded,
-  MdBookmarkBorder,
-  MdBookmarkRemove,
-} from "react-icons/md";
+import { MdBookmarkAdd, MdBookmarkAdded, MdBookmarkBorder, MdBookmarkRemove } from "react-icons/md";
 import {
   DropdownMenu,
   DropdownMenuContent,

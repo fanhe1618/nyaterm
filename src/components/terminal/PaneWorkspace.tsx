@@ -260,9 +260,7 @@ function PaneNodeView({
           sessionType={node.type}
           connectionId={node.connectionId}
           onReconnected={onReconnected}
-          onDisconnectedCloseRequested={() =>
-            void onDisconnectedCloseRequested?.(tab.id, node.id)
-          }
+          onDisconnectedCloseRequested={() => void onDisconnectedCloseRequested?.(tab.id, node.id)}
           syncGroups={syncGroups}
           broadcastToAll={broadcastToAll}
         />

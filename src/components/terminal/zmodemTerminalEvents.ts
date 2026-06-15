@@ -163,9 +163,7 @@ export function createZmodemEventHandler(
       // accept immediately so the remote rz won't time out.
       if (pendingPaths.length === 1) {
         uploadFileName = getLocalPathName(pendingPaths[0] ?? "", "uploaded_file");
-        uploadToastId = toast.message(
-          t("fileTransfer.uploadStarted", { name: uploadFileName }),
-        );
+        uploadToastId = toast.message(t("fileTransfer.uploadStarted", { name: uploadFileName }));
         uploadStarted = true;
       }
       await invoke("zmodem_accept_upload", {
@@ -196,9 +194,7 @@ export function createZmodemEventHandler(
 
       if (resolvedPaths.length === 1) {
         uploadFileName = getLocalPathName(resolvedPaths[0] ?? "", "uploaded_file");
-        uploadToastId = toast.message(
-          t("fileTransfer.uploadStarted", { name: uploadFileName }),
-        );
+        uploadToastId = toast.message(t("fileTransfer.uploadStarted", { name: uploadFileName }));
         uploadStarted = true;
       }
       await invoke("zmodem_accept_upload", {

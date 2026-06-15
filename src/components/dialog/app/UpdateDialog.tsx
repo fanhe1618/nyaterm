@@ -14,8 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useApp } from "@/context/AppContext";
 import { Progress } from "@/components/ui/progress";
+import { useApp } from "@/context/AppContext";
 import type { UpdateInfo, UpdateProgress, UpdateStatus } from "@/lib/updater";
 import { checkForUpdate, downloadAndInstallUpdate, relaunchApp } from "@/lib/updater";
 

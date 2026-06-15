@@ -55,8 +55,8 @@ import type {
   QuickCommand,
   QuickCommandCategory,
   QuickCommandImportResult,
-  QuickCommandsConfig,
   QuickCommandSortMode,
+  QuickCommandsConfig,
   QuickCommandViewMode,
 } from "@/types/global";
 import { openQuickCommand } from "../../lib/windowManager";
@@ -798,9 +798,7 @@ function QuickCommands({ onSend, onSendToAll }: QuickCommandsProps) {
                 <DropdownMenuContent align="end">
                   <DropdownMenuRadioGroup
                     value={sortMode}
-                    onValueChange={(value) =>
-                      setSortMode(normalizeQuickCommandSortMode(value))
-                    }
+                    onValueChange={(value) => setSortMode(normalizeQuickCommandSortMode(value))}
                   >
                     <DropdownMenuRadioItem value="created" className="text-xs">
                       {t("quickCommands.sortByCreated")}

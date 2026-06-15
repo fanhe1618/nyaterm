@@ -174,9 +174,7 @@ export function TransferTab() {
           max={100}
           value={recordingMemoryLimitMiB}
           controlClassName="max-w-sm"
-          onChange={(v) =>
-            update({ recording_memory_limit_bytes: Math.max(1, v) * 1024 * 1024 })
-          }
+          onChange={(v) => update({ recording_memory_limit_bytes: Math.max(1, v) * 1024 * 1024 })}
         />
       </SettingSection>
 

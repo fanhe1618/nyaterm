@@ -446,10 +446,7 @@ export default function SavedConnections({
       recordRecentConnection(conn.id);
     } catch (e) {
       const errorMessage = getErrorMessage(e);
-      if (
-        errorMessage.toLowerCase().includes("session creation cancelled") ||
-        !hasTab(tabId)
-      ) {
+      if (errorMessage.toLowerCase().includes("session creation cancelled") || !hasTab(tabId)) {
         return;
       }
       logger.error({

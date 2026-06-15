@@ -73,7 +73,12 @@ export function useTerminalSettings(
         webglAddonRef.current = null;
       }
     };
-  }, [terminalSettings.hardware_acceleration, terminalTransparencyEnabled, rendererVisible, terminalRef]);
+  }, [
+    terminalSettings.hardware_acceleration,
+    terminalTransparencyEnabled,
+    rendererVisible,
+    terminalRef,
+  ]);
   // React to terminal theme changes: update terminal colors dynamically
   useEffect(() => {
     if (terminalRef.current) {

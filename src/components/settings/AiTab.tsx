@@ -377,7 +377,8 @@ export function AiModelsTab() {
     update({
       models,
       default_model_id:
-        ai.default_model_id && models.some((item) => item.enabled && item.id === ai.default_model_id)
+        ai.default_model_id &&
+        models.some((item) => item.enabled && item.id === ai.default_model_id)
           ? ai.default_model_id
           : model.id,
     });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { MultiLinePasteDialogProps } from "@/components/terminal/xterminalTypes";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import type { MultiLinePasteDialogProps } from "@/components/terminal/xterminalTypes";
 
 function normalizePasteNewlines(text: string): string {
   return text.replace(/\r\n|\r/gu, "\n");

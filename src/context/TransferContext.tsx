@@ -290,9 +290,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
         !p.parent_id &&
         kind === "directory"
       ) {
-        const toastId = toast.message(
-          t("fileTransfer.uploadFolderStarted", { name: p.file_name }),
-        );
+        const toastId = toast.message(t("fileTransfer.uploadFolderStarted", { name: p.file_name }));
         uploadFolderToastIdsRef.current.set(p.id, toastId);
         return;
       }
