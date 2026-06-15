@@ -1550,6 +1550,7 @@
     "noRecentSessions": "没有最近的会话",
     "noSavedSessions": "没有已保存的会话",
     "noShellSessions": "没有已保存的 Shell 会话",
+    "openTabs": "打开的标签",
     "pressEnterToReconnect": "按回车键重新连接",
     "recentSessions": "最近的会话",
     "reconnectFailed": "重新连接失败",
