@@ -1,3 +1,4 @@
+import { emit } from "@tauri-apps/api/event";
 import {
   type DragEvent,
   memo,
@@ -12,12 +13,12 @@ import { useTranslation } from "react-i18next";
 import {
   MdAdd,
   MdCellTower,
-  MdChevronLeft,
-  MdChevronRight,
+  MdCheck,
   MdClose,
   MdContentCopy,
   MdDns,
   MdErrorOutline,
+  MdExpandMore,
   MdFolder,
   MdHistory,
   MdTerminal,
@@ -186,14 +187,13 @@ function TabBar({
   const { appSettings, savedConnections, savedGroups, syncGroups, broadcastToAll } = useApp();
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const pendingOpenTabFocusRef = useRef<Tab | null>(null);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const tabButtonRefs = useRef(new Map<string, HTMLDivElement>());
   const draggedTabIdRef = useRef<string | null>(null);
   const tabStripAnimatingRef = useRef(false);
   const tabStripScrollAnimationRef = useRef<(() => void) | null>(null);
   const [tabStripScroll, setTabStripScroll] = useState({
-    canScrollLeft: false,
-    canScrollRight: false,
     hasOverflow: false,
   });
 
@@ -274,23 +274,22 @@ function TabBar({
       .slice(0, 10);
   }, [appSettings.ui.recent_connection_ids, savedConnections]);
 
+  const openTabsMenuItems = useMemo(
+    () => tabs.map((tab, index) => ({ tab, index })).reverse(),
+    [tabs],
+  );
+
   const updateTabStripScrollState = useCallback(() => {
     const strip = tabStripRef.current;
     if (!strip) return;
 
     const maxScrollLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
     const nextState = {
-      canScrollLeft: strip.scrollLeft > 1,
-      canScrollRight: strip.scrollLeft < maxScrollLeft - 1,
       hasOverflow: maxScrollLeft > 1,
     };
 
     setTabStripScroll((current) =>
-      current.canScrollLeft === nextState.canScrollLeft &&
-      current.canScrollRight === nextState.canScrollRight &&
-      current.hasOverflow === nextState.hasOverflow
-        ? current
-        : nextState,
+      current.hasOverflow === nextState.hasOverflow ? current : nextState,
     );
   }, []);
 
@@ -310,34 +309,9 @@ function TabBar({
     [updateTabStripScrollState],
   );
 
-  const getTabStripStepTarget = useCallback((direction: -1 | 1): number | null => {
+  const getTabScrollTarget = useCallback((tabId: string): number | null => {
     const strip = tabStripRef.current;
-    if (!strip) return null;
-
-    const pageWidth = strip.clientWidth;
-    const targetScrollLeft =
-      direction === 1 ? strip.scrollLeft + pageWidth : strip.scrollLeft - pageWidth;
-    const clampedTarget = clampTabStripScrollLeft(strip, targetScrollLeft);
-
-    if (Math.abs(clampedTarget - strip.scrollLeft) < 1) return null;
-    return clampedTarget;
-  }, []);
-
-  const scrollTabStripPage = useCallback(
-    (direction: -1 | 1) => {
-      if (tabStripAnimatingRef.current) return;
-      const targetScrollLeft = getTabStripStepTarget(direction);
-      if (targetScrollLeft === null) return;
-      runTabStripScrollAnimation(targetScrollLeft);
-    },
-    [getTabStripStepTarget, runTabStripScrollAnimation],
-  );
-
-  const getActiveTabScrollTarget = useCallback((): number | null => {
-    if (!activeTabId) return null;
-
-    const strip = tabStripRef.current;
-    const tabElement = tabButtonRefs.current.get(activeTabId);
+    const tabElement = tabButtonRefs.current.get(tabId);
     if (!strip || !tabElement) return null;
 
     const scrollLeft = strip.scrollLeft;
@@ -355,11 +329,12 @@ function TabBar({
     }
 
     return clampTabStripScrollLeft(strip, tabRight - strip.clientWidth + padding);
-  }, [activeTabId]);
+  }, []);
 
-  const scrollActiveTabIntoView = useCallback(
-    (smooth: boolean) => {
-      const targetScrollLeft = getActiveTabScrollTarget();
+  const scrollTabIntoView = useCallback(
+    (tabId: string | null, smooth: boolean) => {
+      if (!tabId) return;
+      const targetScrollLeft = getTabScrollTarget(tabId);
       if (targetScrollLeft === null) return;
 
       if (smooth) {
@@ -372,7 +347,7 @@ function TabBar({
       strip.scrollLeft = targetScrollLeft;
       updateTabStripScrollState();
     },
-    [getActiveTabScrollTarget, runTabStripScrollAnimation, updateTabStripScrollState],
+    [getTabScrollTarget, runTabStripScrollAnimation, updateTabStripScrollState],
   );
 
   const handleTabStripScroll = useCallback(() => {
@@ -382,7 +357,7 @@ function TabBar({
 
   useLayoutEffect(() => {
     updateTabStripScrollState();
-  }, [tabs, updateTabStripScrollState]);
+  });
 
   useLayoutEffect(() => {
     const strip = tabStripRef.current;
@@ -390,16 +365,16 @@ function TabBar({
 
     const observer = new ResizeObserver(() => {
       updateTabStripScrollState();
-      scrollActiveTabIntoView(false);
+      scrollTabIntoView(activeTabId, false);
     });
     observer.observe(strip);
 
     return () => observer.disconnect();
-  }, [scrollActiveTabIntoView, tabs, updateTabStripScrollState]);
+  }, [activeTabId, scrollTabIntoView, updateTabStripScrollState]);
 
   useLayoutEffect(() => {
-    scrollActiveTabIntoView(true);
-  }, [activeTabId, scrollActiveTabIntoView]);
+    scrollTabIntoView(activeTabId, true);
+  }, [activeTabId, scrollTabIntoView]);
 
   useLayoutEffect(
     () => () => {
@@ -797,6 +772,57 @@ function TabBar({
     );
   };
 
+  const focusOpenTabTerminal = (tab: Tab) => {
+    const pane = getActivePane(tab);
+
+    requestAnimationFrame(() => {
+      scrollTabIntoView(tab.id, true);
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals"));
+        if (pane?.sessionId) {
+          void emit(`focus-terminal-${pane.sessionId}`);
+        }
+      });
+    });
+  };
+
+  const handleSelectOpenTab = (tab: Tab) => {
+    pendingOpenTabFocusRef.current = tab;
+    onTabChange(tab.id);
+    focusOpenTabTerminal(tab);
+  };
+
+  const renderOpenTabMenuItem = (tab: Tab, index: number) => {
+    const isActive = activeTabId === tab.id;
+    const displayName = getTabDisplayName(tab);
+    const showUnreadIndicator = !isActive && unreadTabIds?.has(tab.id);
+
+    return (
+      <DropdownMenuItem
+        key={tab.id}
+        className="w-full py-1.5"
+        onSelect={() => handleSelectOpenTab(tab)}
+      >
+        <span className="grid w-full grid-cols-[1rem_1rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5">
+          <span className="flex h-4 w-4 items-center justify-center">
+            {isActive ? (
+              <MdCheck className="text-sm" style={{ color: "var(--df-primary)" }} />
+            ) : showUnreadIndicator ? (
+              <span className="h-2 w-2 rounded-full bg-green-500 animate-breathing" />
+            ) : null}
+          </span>
+          <span className="flex h-4 w-4 items-center justify-center text-[var(--df-text-dimmed)]">
+            {renderTabIcon(tab)}
+          </span>
+          <span className="min-w-0 truncate">
+            <span className="mr-1.5 text-[var(--df-text-dimmed)] tabular-nums">{index + 1}</span>
+            {displayName}
+          </span>
+        </span>
+      </DropdownMenuItem>
+    );
+  };
+
   const renderConnectionMenuItem = (connection: SavedConnection, label = connection.name) => (
     <DropdownMenuItem
       key={connection.id}
@@ -837,19 +863,6 @@ function TabBar({
         boxShadow: "inset 0 -1px 0 var(--df-border)",
       }}
     >
-      {tabStripScroll.hasOverflow && (
-        <button
-          type="button"
-          className="flex h-full w-7 shrink-0 items-center justify-center border-r transition-colors df-hover disabled:opacity-30"
-          style={{ color: "var(--df-text-muted)", borderColor: "var(--df-border)" }}
-          aria-label={t("terminal.scrollTabsLeft")}
-          disabled={!tabStripScroll.canScrollLeft}
-          onClick={() => scrollTabStripPage(-1)}
-        >
-          <MdChevronLeft className="text-base" />
-        </button>
-      )}
-
       <div
         ref={tabStripRef}
         className="tab-strip-scroll relative flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
@@ -886,16 +899,43 @@ function TabBar({
       </div>
 
       {tabStripScroll.hasOverflow && (
-        <button
-          type="button"
-          className="flex h-full w-7 shrink-0 items-center justify-center border-l transition-colors df-hover disabled:opacity-30"
-          style={{ color: "var(--df-text-muted)", borderColor: "var(--df-border)" }}
-          aria-label={t("terminal.scrollTabsRight")}
-          disabled={!tabStripScroll.canScrollRight}
-          onClick={() => scrollTabStripPage(1)}
-        >
-          <MdChevronRight className="text-base" />
-        </button>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-full w-8 shrink-0 items-center justify-center border-l transition-colors df-hover"
+                  style={{ color: "var(--df-text-muted)", borderColor: "var(--df-border)" }}
+                  aria-label={t("terminal.openTabs")}
+                >
+                  <MdExpandMore className="text-base" />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6} showArrow>
+              {t("terminal.openTabs")}
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent
+            align="end"
+            className="w-64 max-w-[calc(100vw-1rem)]"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              const pendingTab = pendingOpenTabFocusRef.current;
+              pendingOpenTabFocusRef.current = null;
+              if (pendingTab) {
+                focusOpenTabTerminal(pendingTab);
+              }
+            }}
+          >
+            <DropdownMenuLabel className="text-muted-foreground">
+              {t("terminal.openTabs")}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {openTabsMenuItems.map(({ tab, index }) => renderOpenTabMenuItem(tab, index))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       <DropdownMenu>
