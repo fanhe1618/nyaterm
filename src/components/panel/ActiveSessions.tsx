@@ -1,11 +1,34 @@
 import { listen } from "@tauri-apps/api/event";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MdClose, MdRefresh, MdSearch } from "react-icons/md";
+import {
+  MdDriveFileRenameOutline,
+  MdLinkOff,
+  MdMoreHoriz,
+  MdRefresh,
+  MdSearch,
+} from "react-icons/md";
+import { toast } from "sonner";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
+import { findTabBySessionId, getTabDisplayName } from "@/lib/workspaceTabs";
 import type { SessionInfo } from "@/types/global";
 
 interface ActiveSessionsProps {
@@ -23,9 +46,12 @@ function ActiveSessions({
   canReconnect,
 }: ActiveSessionsProps) {
   const { t } = useTranslation();
+  const { tabs, updateTab } = useApp();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [search, setSearch] = useState("");
   const [busyActions, setBusyActions] = useState<Record<string, "reconnect" | "disconnect">>({});
+  const [renameTabId, setRenameTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -71,12 +97,62 @@ function ActiveSessions({
     };
   }, [fetchSessions]);
 
+  const sessionRows = useMemo(
+    () =>
+      sessions.map((session) => {
+        const tab = findTabBySessionId(tabs, session.id);
+        return {
+          session,
+          tab,
+          displayName: tab ? getTabDisplayName(tab) : session.name,
+        };
+      }),
+    [sessions, tabs],
+  );
+
   const query = search.trim().toLowerCase();
-  const filteredSessions = query
-    ? sessions.filter((session) =>
-        `${session.name} ${session.session_type} ${session.id}`.toLowerCase().includes(query),
+  const filteredRows = query
+    ? sessionRows.filter(({ session, displayName }) =>
+        `${displayName} ${session.name} ${session.session_type} ${session.id}`
+          .toLowerCase()
+          .includes(query),
       )
-    : sessions;
+    : sessionRows;
+
+  const renameTab = renameTabId ? tabs.find((tab) => tab.id === renameTabId) : null;
+
+  const handleRenameOpen = useCallback((tabId: string, displayName: string) => {
+    setRenameTabId(tabId);
+    setRenameValue(displayName);
+  }, []);
+
+  const handleRenameClose = useCallback(() => {
+    setRenameTabId(null);
+    setRenameValue("");
+  }, []);
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renameTab) {
+      handleRenameClose();
+      return;
+    }
+
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      toast.error(t("tabCtx.renameEmpty"));
+      return;
+    }
+    if (trimmed.length > 64) {
+      return;
+    }
+
+    try {
+      await updateTab(renameTab.id, { customName: trimmed }, { immediatePersist: true });
+      handleRenameClose();
+    } catch {
+      toast.error(t("tabCtx.renameFailed"));
+    }
+  }, [handleRenameClose, renameTab, renameValue, t, updateTab]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -84,7 +160,7 @@ function ActiveSessions({
         title={t("panel.activeSessions")}
         actions={
           <span className="text-[0.6875rem]" style={{ color: "var(--df-text-dimmed)" }}>
-            {query ? `${filteredSessions.length}/${sessions.length}` : sessions.length}
+            {query ? `${filteredRows.length}/${sessions.length}` : sessions.length}
           </span>
         }
       />
@@ -115,7 +191,7 @@ function ActiveSessions({
           >
             {t("panel.noActiveSessions")}
           </div>
-        ) : filteredSessions.length === 0 ? (
+        ) : filteredRows.length === 0 ? (
           <div
             className="text-center py-4 text-[0.6875rem]"
             style={{ color: "var(--df-text-dimmed)" }}
@@ -123,7 +199,7 @@ function ActiveSessions({
             {t("activeSessions.noMatches")}
           </div>
         ) : (
-          filteredSessions.map((session) => (
+          filteredRows.map(({ session, tab, displayName }) => (
             <div
               key={session.id}
               className={`flex items-center gap-2 rounded-md p-2 transition-colors df-hover ${!session.connected ? "opacity-50" : ""}`}
@@ -136,7 +212,7 @@ function ActiveSessions({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate" style={{ color: "var(--df-text)" }}>
-                    {session.name}
+                    {displayName}
                   </span>
                   <span
                     className="rounded px-1.5 py-0.5 text-[0.625rem] uppercase tracking-wide"
@@ -161,35 +237,91 @@ function ActiveSessions({
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  disabled={!!busyActions[session.id] || !canReconnect(session.id)}
+                  disabled={!tab}
                   onClick={(event) => {
                     event.stopPropagation();
-                    void runAction(session.id, "reconnect");
+                    if (tab) {
+                      handleRenameOpen(tab.id, displayName);
+                    }
                   }}
-                  aria-label={t("tabCtx.reconnect")}
+                  aria-label={t("tabCtx.rename")}
                 >
-                  <MdRefresh
-                    className={`h-4 w-4 ${busyActions[session.id] === "reconnect" ? "animate-spin" : ""}`}
-                  />
+                  <MdDriveFileRenameOutline className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 rounded-md text-muted-foreground hover:text-destructive disabled:opacity-40"
-                  disabled={!!busyActions[session.id]}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void runAction(session.id, "disconnect");
-                  }}
-                  aria-label={t("activeSessions.disconnect")}
-                >
-                  <MdClose className="h-4 w-4" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      onClick={(event) => event.stopPropagation()}
+                      aria-label={t("common.more")}
+                    >
+                      <MdMoreHoriz className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-40">
+                    <DropdownMenuItem
+                      disabled={!!busyActions[session.id] || !canReconnect(session.id)}
+                      onSelect={() => void runAction(session.id, "reconnect")}
+                    >
+                      <MdRefresh
+                        className={`h-4 w-4 ${
+                          busyActions[session.id] === "reconnect" ? "animate-spin" : ""
+                        }`}
+                      />
+                      {t("tabCtx.reconnect")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!!busyActions[session.id]}
+                      variant="destructive"
+                      onSelect={() => void runAction(session.id, "disconnect")}
+                    >
+                      <MdLinkOff className="h-4 w-4" />
+                      {t("tabCtx.disconnect")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           ))
         )}
       </div>
+
+      <Dialog open={!!renameTabId} onOpenChange={(open) => !open && handleRenameClose()}>
+        <DialogContent showCloseButton={false} className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm">{t("tabCtx.renameTitle")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("tabCtx.renameTitle")}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              className="text-sm"
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void handleRenameSubmit();
+                }
+              }}
+              maxLength={64}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={handleRenameClose}>
+              {t("dialog.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void handleRenameSubmit()}
+              disabled={!renameValue.trim()}
+            >
+              {t("dialog.save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
