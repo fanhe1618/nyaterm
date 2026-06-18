@@ -4,7 +4,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::mem;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use time::OffsetDateTime;
 
 pub const DEFAULT_MEMORY_LIMIT_BYTES: usize = 5 * 1024 * 1024;
@@ -333,9 +333,9 @@ impl RecordingManager {
         let path = prepare_output_file_path(file_path)?;
         let file = File::create(&path)
             .map_err(|e| AppError::Config(format!("Failed to create recording file: {e}")))?;
-        let memory_limit_bytes = *self.memory_limit_bytes.lock().unwrap();
+        let memory_limit_bytes = *lock_recover(&self.memory_limit_bytes);
 
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = lock_recover(&self.sessions);
         let state = sessions
             .entry(session_id.to_string())
             .or_insert_with(|| SessionCaptureState::new(memory_limit_bytes));
@@ -344,7 +344,7 @@ impl RecordingManager {
     }
 
     pub fn stop(&self, session_id: &str) -> AppResult<String> {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = lock_recover(&self.sessions);
         let state = sessions
             .get_mut(session_id)
             .ok_or_else(|| AppError::Config("No active recording".to_string()))?;
@@ -360,7 +360,7 @@ impl RecordingManager {
     ) -> AppResult<String> {
         let path = prepare_output_file_path(file_path)?;
         let records = {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = lock_recover(&self.sessions);
             sessions
                 .get_mut(session_id)
                 .map(SessionCaptureState::snapshot_records)
@@ -388,9 +388,9 @@ impl RecordingManager {
 
     pub fn set_memory_limit(&self, max_bytes: usize) {
         let bounded = max_bytes.max(1);
-        *self.memory_limit_bytes.lock().unwrap() = bounded;
+        *lock_recover(&self.memory_limit_bytes) = bounded;
 
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = lock_recover(&self.sessions);
         for state in sessions.values_mut() {
             state.set_memory_limit(bounded);
         }
@@ -399,7 +399,7 @@ impl RecordingManager {
     pub fn is_recording(&self, session_id: &str) -> bool {
         self.sessions
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(session_id)
             .is_some_and(|state| state.recording.is_some())
     }
@@ -407,15 +407,15 @@ impl RecordingManager {
     pub fn list_recording_sessions(&self) -> Vec<String> {
         self.sessions
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
             .filter_map(|(id, state)| state.recording.as_ref().map(|_| id.clone()))
             .collect()
     }
 
     pub fn write_output(&self, session_id: &str, data: &str) {
-        let memory_limit_bytes = *self.memory_limit_bytes.lock().unwrap();
-        let mut sessions = self.sessions.lock().unwrap();
+        let memory_limit_bytes = *lock_recover(&self.memory_limit_bytes);
+        let mut sessions = lock_recover(&self.sessions);
         let state = sessions
             .entry(session_id.to_string())
             .or_insert_with(|| SessionCaptureState::new(memory_limit_bytes));
@@ -424,8 +424,8 @@ impl RecordingManager {
     }
 
     pub fn write_input(&self, session_id: &str, data: &[u8]) {
-        let memory_limit_bytes = *self.memory_limit_bytes.lock().unwrap();
-        let mut sessions = self.sessions.lock().unwrap();
+        let memory_limit_bytes = *lock_recover(&self.memory_limit_bytes);
+        let mut sessions = lock_recover(&self.sessions);
         let state = sessions
             .entry(session_id.to_string())
             .or_insert_with(|| SessionCaptureState::new(memory_limit_bytes));
@@ -435,7 +435,7 @@ impl RecordingManager {
 
     pub fn cleanup_session(&self, session_id: &str) {
         let removed = {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = lock_recover(&self.sessions);
             sessions.remove(session_id)
         };
         if let Some(mut state) = removed {
@@ -506,6 +506,12 @@ fn strip_one_leading_newline(text: &str) -> &str {
     text.strip_prefix('\n').unwrap_or(text)
 }
 
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn strip_terminal_control_sequences(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
@@ -554,7 +560,7 @@ fn strip_terminal_control_sequences(text: &str) -> String {
                         }
                     }
                     _ => {
-                        i += 1;
+                        advance_one_char(text, &mut i);
                     }
                 }
             }
@@ -578,10 +584,13 @@ fn strip_terminal_control_sequences(text: &str) -> String {
                 i += 1;
             }
             _ => {
-                let ch = text[i..]
-                    .chars()
-                    .next()
-                    .expect("UTF-8 string must decode to at least one char");
+                if !text.is_char_boundary(i) {
+                    i += 1;
+                    continue;
+                }
+                let Some(ch) = text[i..].chars().next() else {
+                    break;
+                };
                 out.push(ch);
                 i += ch.len_utf8();
             }
@@ -591,11 +600,28 @@ fn strip_terminal_control_sequences(text: &str) -> String {
     out
 }
 
+fn advance_one_char(text: &str, index: &mut usize) {
+    if *index >= text.len() {
+        return;
+    }
+
+    if !text.is_char_boundary(*index) {
+        *index += 1;
+        return;
+    }
+
+    if let Some(ch) = text[*index..].chars().next() {
+        *index += ch.len_utf8();
+    } else {
+        *index = text.len();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        RecordingManager, consume_matching_prefix, strip_one_leading_newline,
-        strip_terminal_control_sequences,
+        consume_matching_prefix, strip_one_leading_newline, strip_terminal_control_sequences,
+        RecordingManager,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -623,6 +649,15 @@ mod tests {
 
         let cleaned = strip_terminal_control_sequences(raw);
         assert_eq!(cleaned, "app.log  go\n[root@ubuntu ~]\n\n# ");
+    }
+
+    #[test]
+    fn strips_unknown_escape_with_multibyte_replacement_without_panicking() {
+        let raw = format!("before\x1b{}after\n", char::REPLACEMENT_CHARACTER);
+
+        let cleaned = strip_terminal_control_sequences(&raw);
+
+        assert_eq!(cleaned, "beforeafter\n");
     }
 
     #[test]
@@ -705,6 +740,22 @@ mod tests {
 
         assert!(!saved.contains("first line"));
         assert!(saved.contains("third line"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn saves_transcript_after_binary_like_output() {
+        let manager = RecordingManager::new();
+        let output = format!("ready\x1b{}done\n", char::REPLACEMENT_CHARACTER);
+
+        manager.write_output("s1", &output);
+
+        let path = unique_path("binary-like");
+        manager.save_transcript("s1", &path, true, true).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+
+        assert!(saved.contains("readydone"));
 
         let _ = fs::remove_file(path);
     }
