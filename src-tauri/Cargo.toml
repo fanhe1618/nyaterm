@@ -120,8 +120,16 @@ open = "5"
 tokio-socks = "0.5.2"
 async-http-proxy = { version = "1.2.5", features = ["runtime-tokio", "basic-auth"] }
 font-kit = "0.14.3"
-reqwest = { version = "0.13", features = ["json", "form", "query"] }
-genai = "0.6.5"
+reqwest = { version = "0.13", default-features = false, features = [
+    "json",
+    "form",
+    "query",
+    "native-tls",
+] }
+reqwest_012_native_tls = { package = "reqwest", version = "0.12.28", default-features = false, features = [
+    "native-tls",
+] }
+genai = { version = "0.6.5", default-features = false, features = ["native-tls"] }
 futures-util = "0.3"
 regex = "1"
 md-5 = "0.10"
@@ -136,19 +144,25 @@ rqrr = "0.9"
 serialport = "4"
 strip-ansi-escapes = "0.2"
 arboard = "3"
-opendal = { version = "0.55", features = [
+opendal = { version = "0.57", default-features = false, features = [
+    "executors-tokio",
     "services-aliyun-drive",
     "services-gdrive",
     "services-onedrive",
     "services-s3",
     "services-webdav",
+    "layers-retry",
+    "layers-timeout",
     "layers-tracing",
 ] }
 redb = "4.1.0"
 zmodem2 = { path = "vendor/zmodem2" }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = [
+    "native-tls",
+    "zip",
+] }
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 
