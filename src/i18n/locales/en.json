@@ -695,18 +695,19 @@
   },
   "otp": {
     "cancel": "Cancel",
-    "cancelled": "2FA cancelled",
+    "cancelled": "Verification cancelled",
     "copied": "Copied",
     "copyCode": "Copy",
     "currentCode": "Code",
-    "description": "\"{{name}}\" requires verification.",
+    "description": "\"{{name}}\" needs an authentication response.",
     "expiresIn": "{{seconds}}s remaining",
     "generateCode": "Generate",
     "hotpHint": "Generate on demand. The counter advances each time.",
     "loadingCode": "Loading",
     "sendToInput": "Send",
     "submit": "Verify",
-    "title": "2FA"
+    "title": "Authentication Prompt",
+    "titleWithRound": "Authentication Prompt {{round}}"
   },
   "otpManager": {
     "add": "Add",

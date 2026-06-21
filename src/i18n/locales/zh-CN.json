@@ -695,18 +695,19 @@
   },
   "otp": {
     "cancel": "取消",
-    "cancelled": "双因素认证已取消",
+    "cancelled": "身份验证已取消",
     "copied": "已复制",
     "copyCode": "复制验证码",
     "currentCode": "当前验证码",
-    "description": "\"{{name}}\" 需要额外的身份验证。",
+    "description": "\"{{name}}\" 需要身份验证响应。",
     "expiresIn": "剩余 {{seconds}} 秒",
     "generateCode": "生成验证码",
     "hotpHint": "按需生成验证码，每次生成都会推进计数器。",
     "loadingCode": "正在加载验证码",
     "sendToInput": "发送到输入框",
     "submit": "验证",
-    "title": "双因素认证"
+    "title": "身份验证提示",
+    "titleWithRound": "身份验证提示 {{round}}"
   },
   "otpManager": {
     "add": "添加",
