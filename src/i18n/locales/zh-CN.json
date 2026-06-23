@@ -1465,6 +1465,8 @@
     "showTimestampMillisecondsDesc": "时间戳显示为 HH:mm:ss.SSS 格式。",
     "showTimestamps": "显示时间戳",
     "showTimestampsDesc": "在终端侧边栏显示每行输出的时间。",
+    "showWorkspacePadding": "显示空白",
+    "showWorkspacePaddingDesc": "在终端内容左侧增加一点空白区域。",
     "startupBehavior": "启动行为",
     "startupRestore": "启动时恢复先前的会话标签",
     "startupRestoreDesc": "自动重新打开在应用程序上次关闭时处于活动状态的终端会话。",

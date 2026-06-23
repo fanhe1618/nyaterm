@@ -1465,6 +1465,8 @@
     "showTimestampMillisecondsDesc": "Display timestamps in HH:mm:ss.SSS format.",
     "showTimestamps": "Show Timestamps",
     "showTimestampsDesc": "Show output time in the terminal gutter.",
+    "showWorkspacePadding": "Show Padding",
+    "showWorkspacePaddingDesc": "Add a little blank space on the left side of terminal content.",
     "startupBehavior": "Startup",
     "startupRestore": "Restore tabs on startup",
     "startupRestoreDesc": "Reopen terminal sessions active before last close.",
