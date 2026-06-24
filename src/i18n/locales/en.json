@@ -1697,6 +1697,8 @@
     "noSavedSessions": "No saved sessions",
     "noShellSessions": "No saved shell sessions",
     "openTabs": "Open Tabs",
+    "pasteImageAsPath": "Paste image or image file as path",
+    "pasteImageAsPathDesc": "When pasting a screenshot or copied image file into a local or SSH terminal, insert a readable file path. SSH sessions upload the image first. Useful for CLI tools such as Claude Code and Codex.",
     "pressEnterToReconnect": "Press Enter to reconnect",
     "recentSessions": "Recent Sessions",
     "reconnectFailed": "Reconnect failed",

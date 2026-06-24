@@ -1697,6 +1697,8 @@
     "noSavedSessions": "没有已保存的会话",
     "noShellSessions": "没有已保存的 Shell 会话",
     "openTabs": "打开的标签",
+    "pasteImageAsPath": "粘贴图片/图片文件为路径",
+    "pasteImageAsPathDesc": "在本地或 SSH 终端粘贴截图/复制的图片文件时，自动插入可读取的文件路径；SSH 会先上传图片。适用于 Claude Code、Codex 等支持图片路径的 CLI 工具。",
     "pressEnterToReconnect": "按回车键重新连接",
     "recentSessions": "最近的会话",
     "reconnectFailed": "重新连接失败",
