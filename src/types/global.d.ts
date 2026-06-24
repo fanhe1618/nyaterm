@@ -579,6 +579,7 @@ export interface TerminalSettings {
   show_timestamps: boolean;
   show_timestamp_milliseconds: boolean;
   show_multi_line_paste_dialog: boolean;
+  paste_image_as_path: boolean;
 }
 
 export interface TransferSettings {

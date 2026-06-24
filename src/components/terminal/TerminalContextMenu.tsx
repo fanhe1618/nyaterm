@@ -17,7 +17,6 @@ import {
 import { useTerminalAppSettings } from "@/context/AppContext";
 import { resolveDisplayKeys } from "@/hooks/useShortcutMap";
 import { openAIAssistant } from "@/lib/aiEvents";
-import { readClipboardText } from "@/lib/clipboard";
 import type { SearchEngine } from "@/types/global";
 import TranslationDialog from "../dialog/terminal/TranslationDialog";
 import { type QuickIconDef, SEARCH_ICONS } from "../icons";
@@ -38,6 +37,7 @@ interface TerminalContextMenuProps {
   terminalRef: React.RefObject<Terminal | null>;
   onFind: (selection?: string) => void;
   onPasteText: (text: string) => void;
+  onPasteClipboard: () => Promise<void> | void;
 }
 
 export default function TerminalContextMenu({
@@ -45,6 +45,7 @@ export default function TerminalContextMenu({
   terminalRef,
   onFind,
   onPasteText,
+  onPasteClipboard,
 }: TerminalContextMenuProps) {
   const { t } = useTranslation();
   const termSettings = useTerminalAppSettings();
@@ -95,8 +96,7 @@ export default function TerminalContextMenu({
       e.stopPropagation();
       (async () => {
         try {
-          const text = await readClipboardText();
-          pasteText(text);
+          await onPasteClipboard();
         } catch {
           /* clipboard access denied */
         }
@@ -113,13 +113,12 @@ export default function TerminalContextMenu({
 
   const doPaste = useCallback(async () => {
     try {
-      const text = await readClipboardText();
-      pasteText(text);
+      await onPasteClipboard();
     } catch {
       /* clipboard access denied */
     }
     terminalRef.current?.focus();
-  }, [pasteText, terminalRef]);
+  }, [onPasteClipboard, terminalRef]);
 
   const doCopy = useCallback(
     (text: string) => {

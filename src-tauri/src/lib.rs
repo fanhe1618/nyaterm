@@ -99,6 +99,8 @@ pub fn run() {
             cmd::ai::append_ai_audit,
             cmd::ai::get_ai_audit_logs,
             cmd::clipboard::read_clipboard_text,
+            cmd::clipboard::read_clipboard_path_payload,
+            cmd::clipboard::upload_clipboard_image_to_ssh,
             cmd::log::append_frontend_logs,
             cmd::log::export_diagnostics,
             cmd::settings::get_system_fonts,

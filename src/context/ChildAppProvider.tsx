@@ -80,6 +80,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     show_timestamps: false,
     show_timestamp_milliseconds: false,
     show_multi_line_paste_dialog: true,
+    paste_image_as_path: true,
   },
   interaction: {
     copy_on_select: false,

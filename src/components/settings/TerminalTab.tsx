@@ -207,6 +207,20 @@ export function TerminalTab() {
           />
         </SettingRow>
 
+        <SettingRow
+          label={t("terminal.pasteImageAsPath")}
+          desc={t("terminal.pasteImageAsPathDesc")}
+        >
+          <SettingSwitch
+            checked={appSettings.terminal.paste_image_as_path ?? true}
+            onChange={(v) =>
+              updateAppSettings({
+                terminal: { ...appSettings.terminal, paste_image_as_path: v },
+              })
+            }
+          />
+        </SettingRow>
+
         <SettingRow label={t("settings.showRemoteStats")} desc={t("settings.showRemoteStatsDesc")}>
           <SettingSwitch
             checked={appSettings.ui.show_remote_stats ?? true}

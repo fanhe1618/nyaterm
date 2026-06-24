@@ -22,7 +22,11 @@ import { useTerminalSettings } from "@/hooks/useTerminalSettings";
 import { emitAIErrorDetected } from "@/lib/aiEvents";
 import { renderAiCommandEnd, renderAiCommandStart } from "@/lib/aiTerminalRenderer";
 import { buildTerminalThemeColors, isTerminalTransparencyEnabled } from "@/lib/backgroundImage";
-import { readClipboardText } from "@/lib/clipboard";
+import {
+  readClipboardPathPayload,
+  readClipboardText,
+  uploadClipboardImageToSsh,
+} from "@/lib/clipboard";
 import {
   commandStartsSuggestionSuppressingProgram,
   isPagerSearchOrCommandInput,
@@ -89,6 +93,34 @@ import { createZmodemEventHandler, type ZmodemEventPayload } from "./zmodemTermi
 import "@xterm/xterm/css/xterm.css";
 
 const BACKSPACE_INPUT = "\x7f";
+
+function isWindowsPlatform() {
+  return /win/i.test(navigator.platform || "");
+}
+
+function quotePastedPath(path: string) {
+  if (isWindowsPlatform()) {
+    return `"${path.replace(/"/g, '\\"')}"`;
+  }
+  return quotePosixPath(path);
+}
+
+function quotePosixPath(path: string) {
+  return `'${path.replace(/'/g, "'\\''")}'`;
+}
+
+function buildClipboardPathPasteText(
+  payload: Awaited<ReturnType<typeof readClipboardPathPayload>>,
+) {
+  if (!payload) return null;
+  if (payload.kind === "image_file") {
+    return payload.path ? quotePastedPath(payload.path) : null;
+  }
+
+  const paths = payload.paths.map((path) => path.trim()).filter((path) => !!path);
+  if (paths.length === 0) return null;
+  return paths.map(quotePastedPath).join(" ");
+}
 
 interface SessionCommandAcceptedEvent {
   sessionId: string;
@@ -201,6 +233,44 @@ export default function XTerminal({
   const credentialPromptBufferRef = useRef("");
   const credentialPromptInputUntilRef = useRef(0);
   const commandSuggestionSuppressedRef = useRef(false);
+
+  const pasteClipboard = useCallback(async () => {
+    const pasteImageAsPathEnabled =
+      terminalAppSettingsRef.current?.terminal?.paste_image_as_path ?? true;
+    const currentSessionType = sessionTypeRef.current;
+
+    if (pasteImageAsPathEnabled && currentSessionType === "Local") {
+      try {
+        const payload = await readClipboardPathPayload();
+        const pathText = buildClipboardPathPasteText(payload);
+        if (pathText) {
+          pasteTextRef.current(pathText, { skipDialog: true });
+          return;
+        }
+      } catch {
+        /* fall back to text clipboard */
+      }
+    }
+
+    if (pasteImageAsPathEnabled && currentSessionType === "SSH") {
+      try {
+        const payload = await uploadClipboardImageToSsh(sessionIdRef.current);
+        if (payload?.remote_path) {
+          const quotedRemotePath = quotePosixPath(payload.remote_path);
+          await sendSessionInput(sessionIdRef.current, quotedRemotePath, {
+            preview: { kind: "data", data: quotedRemotePath },
+            registerSubmission: null,
+          });
+          return;
+        }
+      } catch {
+        /* fall back to text clipboard */
+      }
+    }
+
+    const text = await readClipboardText();
+    pasteTextRef.current(text);
+  }, []);
 
   useEffect(() => {
     sessionTypeRef.current = sessionType;
@@ -764,11 +834,7 @@ export default function XTerminal({
 
       if (isShiftInsertPasteEvent(e)) {
         e.preventDefault();
-        readClipboardText()
-          .then((text) => {
-            pasteText(text);
-          })
-          .catch(() => {});
+        pasteClipboard().catch(() => {});
         return false;
       }
 
@@ -983,11 +1049,7 @@ export default function XTerminal({
       }
       if (matchesKeyEvent(resolveShortcutKeys("terminal.paste", kb), e)) {
         e.preventDefault();
-        readClipboardText()
-          .then((text) => {
-            pasteText(text);
-          })
-          .catch(() => {});
+        pasteClipboard().catch(() => {});
         return false;
       }
       if (matchesKeyEvent(resolveShortcutKeys("terminal.find", kb), e)) {
@@ -1802,11 +1864,7 @@ export default function XTerminal({
       if (sel) {
         pasteText(sel);
       } else {
-        readClipboardText()
-          .then((text) => {
-            pasteText(text);
-          })
-          .catch(() => {});
+        pasteClipboard().catch(() => {});
       }
     };
 
@@ -2165,6 +2223,7 @@ export default function XTerminal({
           terminalRef={terminalRef}
           onFind={doFind}
           onPasteText={handlePasteText}
+          onPasteClipboard={pasteClipboard}
         >
           <div className={`h-full w-full ${showContentPadding ? "pl-2" : ""}`}>
             <div ref={containerRef} className="h-full w-full" />

@@ -79,6 +79,8 @@ pub struct TerminalSettings {
     pub show_timestamp_milliseconds: bool,
     #[serde(default = "default_true")]
     pub show_multi_line_paste_dialog: bool,
+    #[serde(default = "default_true")]
+    pub paste_image_as_path: bool,
 }
 
 fn default_scrollback() -> u32 {
@@ -107,6 +109,7 @@ impl Default for TerminalSettings {
             show_timestamps: false,
             show_timestamp_milliseconds: false,
             show_multi_line_paste_dialog: true,
+            paste_image_as_path: true,
         }
     }
 }
