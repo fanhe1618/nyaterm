@@ -607,6 +607,8 @@ function TabBar({
           return canReconnectTab(tab);
         case "disconnect_session":
           return canDisconnectTab(tab);
+        case "close_tab":
+          return true;
       }
     },
     [savedConnections],
@@ -642,6 +644,9 @@ function TabBar({
         case "disconnect_session":
           void onDisconnectSession(tab);
           return true;
+        case "close_tab":
+          void onTabClose(tab);
+          return true;
       }
     },
     [
@@ -654,6 +659,7 @@ function TabBar({
       onMultiplexSshSession,
       onReconnectSession,
       onTabChange,
+      onTabClose,
     ],
   );
 

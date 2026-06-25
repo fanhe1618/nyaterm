@@ -26,6 +26,7 @@ export const TAB_MOUSE_ACTIONS = [
   "multiplex_ssh",
   "reconnect_session",
   "disconnect_session",
+  "close_tab",
 ] as const;
 
 export type TabMouseAction = (typeof TAB_MOUSE_ACTIONS)[number];
@@ -43,6 +44,7 @@ export const TAB_MOUSE_ACTION_LABEL_KEYS: Record<TabMouseAction, string> = {
   multiplex_ssh: "tabCtx.multiplexSsh",
   reconnect_session: "tabCtx.reconnect",
   disconnect_session: "tabCtx.disconnect",
+  close_tab: "tabCtx.close",
 };
 
 export function isTabMouseAction(value: unknown): value is TabMouseAction {
