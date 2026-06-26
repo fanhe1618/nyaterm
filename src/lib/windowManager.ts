@@ -9,6 +9,8 @@ import i18n from "../i18n";
 import { invoke } from "./invoke";
 import { isMacOS } from "./platform";
 
+type ChildWindowStateKey = "settings" | "new-session" | "quick-command" | "file-editor";
+
 interface ChildWindowOptions {
   label: string;
   title: string;
@@ -18,6 +20,7 @@ interface ChildWindowOptions {
   width?: number;
   height?: number;
   resizable?: boolean;
+  stateKey?: ChildWindowStateKey;
 }
 
 const MAIN_WINDOW_LABEL = "main";
@@ -292,6 +295,7 @@ export async function openChildWindow(opts: ChildWindowOptions) {
       height: opts.height ?? 560,
       resizable: opts.resizable ?? true,
       alwaysOnTop: needsAlwaysOnTop(opts.label),
+      stateKey: opts.stateKey,
     },
   });
 
@@ -322,6 +326,7 @@ export async function openSettings(tab?: string) {
     parentLabel: ownerMainWindowLabel,
     width: 800,
     height: 560,
+    stateKey: "settings",
   });
   if (tab) {
     const payload = { tab, targetWindowLabel: ownerMainWindowLabel };
@@ -378,6 +383,7 @@ export function openNewSessionWithTarget(
     parentLabel: ownerMainWindowLabel,
     width: 520,
     height: 620,
+    stateKey: "new-session",
   });
 }
 
@@ -392,6 +398,7 @@ export function openQuickCommand(editJson?: string) {
     parentLabel: ownerMainWindowLabel,
     width: 540,
     height: 640,
+    stateKey: "quick-command",
   });
 }
 
@@ -431,6 +438,7 @@ export function openRemoteFileEditor(data: RemoteFileEditorWindowData) {
     parentLabel: ownerMainWindowLabel,
     width: 980,
     height: 720,
+    stateKey: "file-editor",
   }).then((win) => {
     const payload = { targetLabel: label, data };
     emit("remote-file-editor-open", payload);

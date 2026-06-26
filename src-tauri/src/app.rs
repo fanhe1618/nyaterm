@@ -259,6 +259,19 @@ pub fn prepare_app_shutdown(app: &tauri::AppHandle) {
         }
     }
 
+    for window in app.webview_windows().into_values() {
+        if crate::window_state::is_main_window_label(window.label()) {
+            continue;
+        }
+        if let Err(error) = crate::window_state::save_child_webview_window_state(&window) {
+            tracing::warn!(
+                window_label = window.label(),
+                "Failed to save child window state before shutdown: {}",
+                error
+            );
+        }
+    }
+
     let session_manager = app.state::<Arc<SessionManager>>();
     session_manager.flush_history_before_shutdown();
 
@@ -315,5 +328,26 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             }
             _ => {}
         }
+        return;
+    }
+
+    if crate::window_state::child_window_state_key_for_label(window.label()).is_none() {
+        return;
+    }
+
+    match event {
+        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+            crate::window_state::schedule_window_state_save(window.app_handle(), window.label());
+        }
+        tauri::WindowEvent::CloseRequested { .. } => {
+            if let Err(error) = crate::window_state::save_child_window_state(window) {
+                tracing::warn!(
+                    window_label = window.label(),
+                    "Failed to save child window state on close: {}",
+                    error
+                );
+            }
+        }
+        _ => {}
     }
 }

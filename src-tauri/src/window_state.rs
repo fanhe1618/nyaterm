@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{Manager, PhysicalPosition, PhysicalRect, PhysicalSize, Position};
@@ -10,8 +11,15 @@ const DEFAULT_MAIN_WIDTH: f64 = 1280.0;
 const DEFAULT_MAIN_HEIGHT: f64 = 800.0;
 const MIN_MAIN_WIDTH: f64 = 720.0;
 const MIN_MAIN_HEIGHT: f64 = 480.0;
+const MIN_CHILD_WIDTH: f64 = 360.0;
+const MIN_CHILD_HEIGHT: f64 = 240.0;
 pub const MAIN_WINDOW_LABEL: &str = "main";
 pub const MAIN_WINDOW_PREFIX: &str = "main-";
+const SETTINGS_WINDOW_KEY: &str = "settings";
+const NEW_SESSION_WINDOW_KEY: &str = "new-session";
+const QUICK_COMMAND_WINDOW_KEY: &str = "quick-command";
+const FILE_EDITOR_WINDOW_KEY: &str = "file-editor";
+const AUTO_UPLOAD_WINDOW_PREFIX: &str = "auto-upload-";
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +50,87 @@ impl MainWindowState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct WindowStateDoc {
+    #[serde(flatten)]
+    main: MainWindowState,
+    #[serde(default)]
+    children: BTreeMap<String, ChildWindowState>,
+}
+
+impl WindowStateDoc {
+    fn normalized(mut self) -> Self {
+        self.main = self.main.normalized();
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildWindowState {
+    #[serde(default)]
+    pub width: f64,
+    #[serde(default)]
+    pub height: f64,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+impl Default for ChildWindowState {
+    fn default() -> Self {
+        Self {
+            width: 0.0,
+            height: 0.0,
+            maximized: false,
+        }
+    }
+}
+
+impl ChildWindowState {
+    fn normalized(mut self, fallback_width: f64, fallback_height: f64) -> Self {
+        self.width = normalize_child_dimension(self.width, MIN_CHILD_WIDTH, fallback_width);
+        self.height = normalize_child_dimension(self.height, MIN_CHILD_HEIGHT, fallback_height);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChildWindowStateKey {
+    Settings,
+    NewSession,
+    QuickCommand,
+    FileEditor,
+}
+
+impl ChildWindowStateKey {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Settings => SETTINGS_WINDOW_KEY,
+            Self::NewSession => NEW_SESSION_WINDOW_KEY,
+            Self::QuickCommand => QUICK_COMMAND_WINDOW_KEY,
+            Self::FileEditor => FILE_EDITOR_WINDOW_KEY,
+        }
+    }
+
+    fn default_size(self) -> (f64, f64) {
+        match self {
+            Self::Settings => (800.0, 560.0),
+            Self::NewSession => (520.0, 620.0),
+            Self::QuickCommand => (540.0, 640.0),
+            Self::FileEditor => (980.0, 720.0),
+        }
+    }
+
+    fn default_state(self) -> ChildWindowState {
+        let (width, height) = self.default_size();
+        ChildWindowState {
+            width,
+            height,
+            maximized: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ChildWindowPlacement {
     pub x: i32,
@@ -51,11 +140,10 @@ pub struct ChildWindowPlacement {
 #[derive(Debug)]
 struct PendingSave {
     app: tauri::AppHandle,
-    window_label: String,
     scheduled_at: Instant,
 }
 
-static PENDING_SAVE: OnceLock<Mutex<Option<PendingSave>>> = OnceLock::new();
+static PENDING_SAVES: OnceLock<Mutex<BTreeMap<String, PendingSave>>> = OnceLock::new();
 
 fn default_main_width() -> f64 {
     DEFAULT_MAIN_WIDTH
@@ -73,18 +161,85 @@ fn normalize_dimension(value: f64, min: f64, fallback: f64) -> f64 {
     }
 }
 
-fn pending_save() -> &'static Mutex<Option<PendingSave>> {
-    PENDING_SAVE.get_or_init(|| Mutex::new(None))
+fn normalize_child_dimension(value: f64, min: f64, fallback: f64) -> f64 {
+    let fallback = if fallback.is_finite() && fallback > 0.0 {
+        fallback.max(min)
+    } else {
+        min
+    };
+
+    if value.is_finite() && value > 0.0 {
+        value.max(min)
+    } else {
+        fallback
+    }
 }
 
-pub fn load_main_window_state() -> MainWindowState {
-    storage::load_settings_doc::<MainWindowState>(SettingsDocKey::WindowState)
+fn pending_saves() -> &'static Mutex<BTreeMap<String, PendingSave>> {
+    PENDING_SAVES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn load_window_state_doc() -> WindowStateDoc {
+    storage::load_settings_doc::<WindowStateDoc>(SettingsDocKey::WindowState)
         .unwrap_or_default()
         .normalized()
 }
 
+pub fn load_main_window_state() -> MainWindowState {
+    load_window_state_doc().main
+}
+
 pub fn is_main_window_label(label: &str) -> bool {
     label == MAIN_WINDOW_LABEL || label.starts_with(MAIN_WINDOW_PREFIX)
+}
+
+fn is_scoped_child_label(label: &str, base: &str) -> bool {
+    if label == base {
+        return true;
+    }
+
+    label
+        .strip_prefix(base)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(is_main_window_label)
+}
+
+pub fn child_window_state_key_for_label(label: &str) -> Option<ChildWindowStateKey> {
+    if label.starts_with(AUTO_UPLOAD_WINDOW_PREFIX) || is_main_window_label(label) {
+        return None;
+    }
+
+    if is_scoped_child_label(label, SETTINGS_WINDOW_KEY) {
+        return Some(ChildWindowStateKey::Settings);
+    }
+    if is_scoped_child_label(label, NEW_SESSION_WINDOW_KEY) {
+        return Some(ChildWindowStateKey::NewSession);
+    }
+    if is_scoped_child_label(label, QUICK_COMMAND_WINDOW_KEY) {
+        return Some(ChildWindowStateKey::QuickCommand);
+    }
+    if label.starts_with(&format!("{FILE_EDITOR_WINDOW_KEY}-")) {
+        return Some(ChildWindowStateKey::FileEditor);
+    }
+
+    None
+}
+
+pub fn load_child_window_state(
+    key: ChildWindowStateKey,
+    fallback_width: f64,
+    fallback_height: f64,
+) -> ChildWindowState {
+    load_window_state_doc()
+        .children
+        .get(key.as_str())
+        .cloned()
+        .unwrap_or(ChildWindowState {
+            width: fallback_width,
+            height: fallback_height,
+            maximized: false,
+        })
+        .normalized(fallback_width, fallback_height)
 }
 
 pub fn save_main_window_state(window: &tauri::Window) -> AppResult<()> {
@@ -122,63 +277,151 @@ fn save_main_window_state_values(
     inner_size: PhysicalSize<u32>,
     maximized: bool,
 ) -> AppResult<()> {
-    let mut state = load_main_window_state();
-    state.maximized = maximized;
+    storage::update_settings_doc::<WindowStateDoc, _, _>(SettingsDocKey::WindowState, |doc| {
+        let mut state = doc.main.clone().normalized();
+        state.maximized = maximized;
 
-    if !maximized {
-        let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
-            scale_factor
-        } else {
-            1.0
-        };
-        state.width =
-            normalize_dimension(inner_size.width as f64 / scale, MIN_MAIN_WIDTH, state.width);
-        state.height = normalize_dimension(
-            inner_size.height as f64 / scale,
-            MIN_MAIN_HEIGHT,
-            state.height,
-        );
-    }
+        if !maximized {
+            let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+                scale_factor
+            } else {
+                1.0
+            };
+            state.width =
+                normalize_dimension(inner_size.width as f64 / scale, MIN_MAIN_WIDTH, state.width);
+            state.height = normalize_dimension(
+                inner_size.height as f64 / scale,
+                MIN_MAIN_HEIGHT,
+                state.height,
+            );
+        }
 
-    storage::save_settings_doc(SettingsDocKey::WindowState, &state.normalized())
+        doc.main = state.normalized();
+        Ok(())
+    })
 }
 
-pub fn schedule_main_window_state_save(app: &tauri::AppHandle, window_label: &str) {
+pub fn save_child_window_state(window: &tauri::Window) -> AppResult<()> {
+    let Some(key) = child_window_state_key_for_label(window.label()) else {
+        return Ok(());
+    };
+
+    let maximized = window.is_maximized().unwrap_or(false);
+    let scale_factor = window
+        .scale_factor()
+        .map_err(|error| AppError::Config(error.to_string()))?;
+    let inner_size = window
+        .inner_size()
+        .map_err(|error| AppError::Config(error.to_string()))?;
+    save_child_window_state_values(key, scale_factor, inner_size, maximized)
+}
+
+pub fn save_child_webview_window_state(window: &tauri::WebviewWindow) -> AppResult<()> {
+    let Some(key) = child_window_state_key_for_label(window.label()) else {
+        return Ok(());
+    };
+
+    let maximized = window.is_maximized().unwrap_or(false);
+    let scale_factor = window
+        .scale_factor()
+        .map_err(|error| AppError::Config(error.to_string()))?;
+    let inner_size = window
+        .inner_size()
+        .map_err(|error| AppError::Config(error.to_string()))?;
+    save_child_window_state_values(key, scale_factor, inner_size, maximized)
+}
+
+fn save_child_window_state_values(
+    key: ChildWindowStateKey,
+    scale_factor: f64,
+    inner_size: PhysicalSize<u32>,
+    maximized: bool,
+) -> AppResult<()> {
+    storage::update_settings_doc::<WindowStateDoc, _, _>(SettingsDocKey::WindowState, |doc| {
+        let (fallback_width, fallback_height) = key.default_size();
+        let mut state = doc
+            .children
+            .get(key.as_str())
+            .cloned()
+            .unwrap_or_else(|| key.default_state())
+            .normalized(fallback_width, fallback_height);
+        state.maximized = maximized;
+
+        if !maximized {
+            let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+                scale_factor
+            } else {
+                1.0
+            };
+            state.width = normalize_child_dimension(
+                inner_size.width as f64 / scale,
+                MIN_CHILD_WIDTH,
+                state.width,
+            );
+            state.height = normalize_child_dimension(
+                inner_size.height as f64 / scale,
+                MIN_CHILD_HEIGHT,
+                state.height,
+            );
+        }
+
+        doc.children.insert(key.as_str().to_string(), state);
+        Ok(())
+    })
+}
+
+pub fn save_webview_window_state(window: &tauri::WebviewWindow) -> AppResult<()> {
+    if is_main_window_label(window.label()) {
+        return save_main_webview_window_state(window);
+    }
+    save_child_webview_window_state(window)
+}
+
+pub fn schedule_window_state_save(app: &tauri::AppHandle, window_label: &str) {
     let scheduled_at = Instant::now();
+    let window_label = window_label.to_string();
     {
-        let mut pending = pending_save()
+        let mut pending = pending_saves()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *pending = Some(PendingSave {
-            app: app.clone(),
-            window_label: window_label.to_string(),
-            scheduled_at,
-        });
+        pending.insert(
+            window_label.clone(),
+            PendingSave {
+                app: app.clone(),
+                scheduled_at,
+            },
+        );
     }
 
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(SAVE_DEBOUNCE).await;
         let (app, window_label) = {
-            let mut pending = pending_save()
+            let mut pending = pending_saves()
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            match pending.as_ref() {
+            match pending.get(&window_label) {
                 Some(save) if save.scheduled_at == scheduled_at => {
-                    let app = save.app.clone();
-                    let window_label = save.window_label.clone();
-                    *pending = None;
-                    (app, window_label)
+                    let save = pending.remove(&window_label).expect("pending save exists");
+                    (save.app, window_label.clone())
                 }
                 _ => return,
             }
         };
 
         if let Some(window) = app.get_webview_window(&window_label) {
-            if let Err(error) = save_main_webview_window_state(&window) {
-                tracing::warn!("Failed to save main window state: {}", error);
+            if let Err(error) = save_webview_window_state(&window) {
+                tracing::warn!(
+                    window_label = window.label(),
+                    "Failed to save window state: {}",
+                    error
+                );
             }
         }
     });
+}
+
+pub fn schedule_main_window_state_save(app: &tauri::AppHandle, window_label: &str) {
+    schedule_window_state_save(app, window_label);
 }
 
 pub fn center_child_in_parent_monitor(
@@ -266,6 +509,82 @@ mod tests {
         assert_eq!(state.width, DEFAULT_MAIN_WIDTH);
         assert_eq!(state.height, MIN_MAIN_HEIGHT);
         assert!(state.maximized);
+    }
+
+    #[test]
+    fn deserializes_legacy_main_window_state_doc() {
+        let doc: WindowStateDoc =
+            serde_json::from_str(r#"{ "width": 1000, "height": 700, "maximized": true }"#).unwrap();
+
+        assert_eq!(doc.main.width, 1000.0);
+        assert_eq!(doc.main.height, 700.0);
+        assert!(doc.main.maximized);
+        assert!(doc.children.is_empty());
+    }
+
+    #[test]
+    fn deserializes_child_window_state_doc() {
+        let doc: WindowStateDoc = serde_json::from_str(
+            r#"{
+                "width": 1280,
+                "height": 800,
+                "maximized": false,
+                "children": {
+                    "file-editor": { "width": 1100, "height": 760, "maximized": true }
+                }
+            }"#,
+        )
+        .unwrap();
+        let state = doc
+            .children
+            .get(ChildWindowStateKey::FileEditor.as_str())
+            .cloned()
+            .unwrap()
+            .normalized(980.0, 720.0);
+
+        assert_eq!(state.width, 1100.0);
+        assert_eq!(state.height, 760.0);
+        assert!(state.maximized);
+    }
+
+    #[test]
+    fn normalizes_invalid_child_window_state_values() {
+        let state = ChildWindowState {
+            width: f64::NAN,
+            height: 100.0,
+            maximized: false,
+        }
+        .normalized(520.0, 620.0);
+
+        assert_eq!(state.width, 520.0);
+        assert_eq!(state.height, MIN_CHILD_HEIGHT);
+        assert!(!state.maximized);
+    }
+
+    #[test]
+    fn recognizes_child_window_state_keys() {
+        assert_eq!(
+            child_window_state_key_for_label("settings"),
+            Some(ChildWindowStateKey::Settings)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("settings-main-abc"),
+            Some(ChildWindowStateKey::Settings)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("new-session-main-abc"),
+            Some(ChildWindowStateKey::NewSession)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("quick-command-main-abc"),
+            Some(ChildWindowStateKey::QuickCommand)
+        );
+        assert_eq!(
+            child_window_state_key_for_label("file-editor-abc"),
+            Some(ChildWindowStateKey::FileEditor)
+        );
+        assert_eq!(child_window_state_key_for_label("auto-upload-abc"), None);
+        assert_eq!(child_window_state_key_for_label("main"), None);
     }
 
     #[test]

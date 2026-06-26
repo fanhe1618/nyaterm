@@ -26,6 +26,7 @@ pub struct ChildWindowOptions {
     height: Option<f64>,
     resizable: Option<bool>,
     always_on_top: Option<bool>,
+    state_key: Option<crate::window_state::ChildWindowStateKey>,
 }
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -83,8 +84,26 @@ pub async fn open_child_window(
         return Ok(());
     }
 
-    let width = options.width.unwrap_or(720.0);
-    let height = options.height.unwrap_or(560.0);
+    let requested_width = options.width.unwrap_or(720.0);
+    let requested_height = options.height.unwrap_or(560.0);
+    let resizable = options.resizable.unwrap_or(true);
+    let state_key = if resizable {
+        options
+            .state_key
+            .or_else(|| crate::window_state::child_window_state_key_for_label(&options.label))
+    } else {
+        None
+    };
+    let restored_state = state_key.map(|key| {
+        crate::window_state::load_child_window_state(key, requested_width, requested_height)
+    });
+    let width = restored_state
+        .as_ref()
+        .map_or(requested_width, |state| state.width);
+    let height = restored_state
+        .as_ref()
+        .map_or(requested_height, |state| state.height);
+    let maximized = restored_state.as_ref().is_some_and(|state| state.maximized);
     let kind = options.kind.unwrap_or(ChildWindowKind::Modal);
     let parent_label = options
         .parent_label
@@ -100,9 +119,10 @@ pub async fn open_child_window(
     )
     .title(options.title)
     .inner_size(width, height)
+    .maximized(maximized)
     .visible(false)
     .decorations(cfg!(target_os = "macos"))
-    .resizable(options.resizable.unwrap_or(true))
+    .resizable(resizable)
     .always_on_top(options.always_on_top.unwrap_or(false));
 
     #[cfg(target_os = "macos")]
