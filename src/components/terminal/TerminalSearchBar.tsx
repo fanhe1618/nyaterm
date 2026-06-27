@@ -45,9 +45,18 @@ export default function TerminalSearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (show) {
+    if (!show) return;
+
+    const focusInput = () => {
       inputRef.current?.focus();
-    }
+    };
+    const animationFrameId = window.requestAnimationFrame(focusInput);
+    const timeoutId = window.setTimeout(focusInput, 0);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.clearTimeout(timeoutId);
+    };
   }, [show]);
 
   const statusLabel = useMemo(

@@ -132,10 +132,12 @@ export function useTerminalSearch(
     try {
       addonRef.current?.clearDecorations?.();
       addonRef.current?.clearActiveDecoration?.();
+      const terminal = optionsRef.current.terminal ?? terminalRef.current;
+      terminal?.clearSelection();
     } catch {
       // Search cleanup should never break the search UI.
     }
-  }, []);
+  }, [terminalRef]);
 
   const resetSearch = useCallback(() => {
     cancelPendingSearch();
